@@ -1,0 +1,69 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --color-bg: #F7F7F5;
+    --color-primary: #1F5E3B;
+    --color-primary-dark: #16452B;
+    --color-secondary: #3F7D4C;
+    --color-card: #FFFFFF;
+    --color-text: #1A1A1A;
+  }
+
+  body {
+    background-color: #F7F7F5;
+    color: #1A1A1A;
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+  }
+}
+
+/* Custom High-Contrast Outdoor Utilities */
+.btn-primary {
+  @apply bg-[#1F5E3B] hover:bg-[#16452B] active:bg-[#123622] text-white font-bold px-6 py-3.5 rounded-xl shadow-sm transition-colors duration-150 flex items-center justify-center gap-2 select-none;
+}
+
+.btn-secondary {
+  @apply bg-[#3F7D4C] hover:bg-[#31633B] active:bg-[#254C2D] text-white font-semibold px-5 py-3 rounded-xl shadow-sm transition-colors duration-150 flex items-center justify-center gap-2 select-none;
+}
+
+.btn-outline {
+  @apply bg-white border-2 border-[#1F5E3B] text-[#1F5E3B] hover:bg-emerald-50 active:bg-emerald-100 font-bold px-5 py-3 rounded-xl transition-colors duration-150 flex items-center justify-center gap-2 select-none;
+}
+
+.btn-danger {
+  @apply bg-red-700 hover:bg-red-800 active:bg-red-900 text-white font-bold px-5 py-3 rounded-xl transition-colors duration-150 flex items-center justify-center gap-2 select-none;
+}
+
+.card-base {
+  @apply bg-white rounded-2xl border border-[#E2E2DC] shadow-[0_2px_8px_rgba(0,0,0,0.04)] p-4 sm:p-5;
+}
+
+/* Outdoor readability touch targets */
+button, input, select, textarea {
+  min-height: 44px;
+}
+
+/* Safe area for mobile devices */
+.safe-bottom {
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 5rem);
+}
+
+/* Crisp numeric display for outdoor sunlight reading */
+.font-timer {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.03em;
+}
+
+/* Hide scrollbars on mobile pills */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
