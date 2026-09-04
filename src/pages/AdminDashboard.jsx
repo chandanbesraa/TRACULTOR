@@ -52,12 +52,11 @@ export default function AdminDashboard({
   // Filtered Customers
   const filteredCustomers = customers.filter((c) => {
     const q = searchQuery.toLowerCase();
-    return (
-      (c.fullName && c.fullName.toLowerCase().includes(q)) ||
-      (c.customerId && c.customerId.toLowerCase().includes(q)) ||
-      (c.mobileNumber && c.mobileNumber.toLowerCase().includes(q)) ||
-      (c.location && c.location.toLowerCase().includes(q))
-    );
+    const name = (c.name || c.fullName || '').toLowerCase();
+    const phone = (c.phone || c.mobileNumber || '').toLowerCase();
+    const email = (c.email || '').toLowerCase();
+    const addr = (c.address || c.location || '').toLowerCase();
+    return name.includes(q) || phone.includes(q) || email.includes(q) || addr.includes(q);
   });
 
   // Filtered Jobs
@@ -65,12 +64,13 @@ export default function AdminDashboard({
     const q = searchQuery.toLowerCase();
     const matchQuery =
       (j.customerName && j.customerName.toLowerCase().includes(q)) ||
-      (j.operatorCustomerId && j.operatorCustomerId.toLowerCase().includes(q)) ||
+      (j.operatorName && j.operatorName.toLowerCase().includes(q)) ||
       (j.location && j.location.toLowerCase().includes(q)) ||
+      (j.address && j.address.toLowerCase().includes(q)) ||
       (j.id && j.id.toLowerCase().includes(q));
 
     const matchCust =
-      selectedCustomerIdFilter === 'all' || j.operatorCustomerId === selectedCustomerIdFilter;
+      selectedCustomerIdFilter === 'all' || j.userId === selectedCustomerIdFilter;
 
     const matchMode =
       selectedModeFilter === 'all' || j.timerMode === selectedModeFilter;
@@ -127,12 +127,12 @@ export default function AdminDashboard({
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 sm:gap-4">
           <div className="bg-[#1E293B] border border-slate-700 p-4 rounded-2xl">
             <div className="text-[11px] uppercase font-bold text-slate-400 flex items-center gap-1.5">
-              <Users className="w-3.5 h-3.5 text-emerald-400" /> Total Customers
+              <Users className="w-3.5 h-3.5 text-emerald-400" /> Total Accounts
             </div>
             <div className="text-2xl sm:text-3xl font-black text-white font-timer mt-1.5">
               {totalCustomersCount}
             </div>
-            <div className="text-[11px] text-slate-400 mt-0.5">Registered Profiles</div>
+            <div className="text-[11px] text-slate-400 mt-0.5">Profiles Registered</div>
           </div>
 
           <div className="bg-[#1E293B] border border-slate-700 p-4 rounded-2xl">
@@ -191,7 +191,7 @@ export default function AdminDashboard({
               }`}
             >
               <Users className="w-4 h-4" />
-              <span>All Customers ({customers.length})</span>
+              <span>Registered Accounts ({customers.length})</span>
             </button>
 
             <button
@@ -215,7 +215,7 @@ export default function AdminDashboard({
               <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
               <input
                 type="text"
-                placeholder={activeAdminTab === 'customers' ? 'Search by name, @ID, phone, village...' : 'Search jobs by customer, ID, location...'}
+                placeholder={activeAdminTab === 'customers' ? 'Search by name, phone, email, address...' : 'Search jobs by customer, operator, location...'}
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="w-full bg-slate-900 border border-slate-700 rounded-xl pl-9 pr-3.5 py-2 text-xs text-white placeholder-slate-500 focus:border-emerald-500 outline-none"
@@ -238,9 +238,9 @@ export default function AdminDashboard({
               <table className="w-full text-left text-xs sm:text-sm">
                 <thead className="bg-slate-900/80 text-slate-400 font-bold uppercase text-[10px] tracking-wider border-b border-slate-700">
                   <tr>
-                    <th className="py-3.5 px-4">Customer / Operator</th>
+                    <th className="py-3.5 px-4">Account Name</th>
                     <th className="py-3.5 px-4">Contact Info</th>
-                    <th className="py-3.5 px-4">Location</th>
+                    <th className="py-3.5 px-4">Address</th>
                     <th className="py-3.5 px-4 text-center">Jobs</th>
                     <th className="py-3.5 px-4 text-right">Work Hours</th>
                     <th className="py-3.5 px-4 text-right">Gross Billing</th>
@@ -260,10 +260,10 @@ export default function AdminDashboard({
                         <td className="py-3.5 px-4 font-bold text-white">
                           <div className="flex items-center gap-2.5">
                             <div className="w-8 h-8 rounded-lg bg-emerald-700 text-white flex items-center justify-center font-black text-sm">
-                              {cust.fullName ? cust.fullName.charAt(0).toUpperCase() : 'C'}
+                              {(cust.name || cust.fullName || 'O').charAt(0).toUpperCase()}
                             </div>
                             <div>
-                              <div className="text-white font-bold">{cust.fullName}</div>
+                              <div className="text-white font-bold">{cust.name || cust.fullName}</div>
                               <div className="text-[10px] text-slate-400 font-normal">
                                 Joined {cust.createdAt ? formatDate(cust.createdAt) : 'Recently'}
                               </div>
@@ -271,11 +271,11 @@ export default function AdminDashboard({
                           </div>
                         </td>
                         <td className="py-3.5 px-4 font-semibold text-emerald-400">
-                          {cust.mobileNumber || cust.email || cust.customerId || 'Account Registered'}
+                          {cust.phone || cust.mobileNumber || cust.email || 'Registered'}
                         </td>
                         <td className="py-3.5 px-4 text-slate-300">
                           <div className="text-xs text-slate-300 truncate max-w-[150px]">
-                            {cust.location || 'Not Specified'}
+                            {cust.address || cust.location || 'Not Specified'}
                           </div>
                         </td>
                         <td className="py-3.5 px-4 text-center">
@@ -311,10 +311,10 @@ export default function AdminDashboard({
                 onChange={(e) => setSelectedCustomerIdFilter(e.target.value)}
                 className="bg-[#1E293B] border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-white font-semibold outline-none focus:border-emerald-500"
               >
-                <option value="all">All Customer Accounts</option>
+                <option value="all">All Accounts</option>
                 {customers.map((c) => (
-                  <option key={c.id || c.customerId} value={c.id || c.customerId}>
-                    {c.fullName || c.mobileNumber || c.customerId}
+                  <option key={c.id} value={c.id}>
+                    {c.name || c.fullName || c.phone || c.email}
                   </option>
                 ))}
               </select>
@@ -365,14 +365,14 @@ export default function AdminDashboard({
                             <div className="text-[10px] text-slate-400">{formatDate(job.date)}</div>
                           </td>
                           <td className="py-3.5 px-4">
-                            <span className="inline-block px-2 py-0.5 rounded-lg bg-emerald-950 text-emerald-300 font-timer font-bold text-xs border border-emerald-800/40">
-                              {job.operatorCustomerId || '@operator'}
+                            <span className="inline-block px-2 py-0.5 rounded-lg bg-emerald-950 text-emerald-300 font-bold text-xs border border-emerald-800/40">
+                              {job.operatorName || 'Operator'}
                             </span>
                           </td>
                           <td className="py-3.5 px-4">
                             <div className="font-bold text-white">{job.customerName}</div>
                             <div className="text-[11px] text-slate-400 truncate max-w-[140px]">
-                              {job.location || job.workDescription || 'N/A'}
+                              {job.location || job.address || job.workDescription || 'N/A'}
                             </div>
                           </td>
                           <td className="py-3.5 px-4">

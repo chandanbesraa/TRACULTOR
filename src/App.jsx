@@ -83,23 +83,50 @@ export default function App() {
     return () => window.removeEventListener('hashchange', handleHashChange);
   }, []);
 
+  const DEFAULT_LOCAL_OPERATOR = {
+    id: 'trac_local_operator',
+    name: 'Tractor Operator',
+    fullName: 'Tractor Operator',
+    phone: '',
+    mobileNumber: '',
+    email: '',
+    address: 'Field Work',
+    location: 'Field Work',
+    defaultRate: 100,
+    role: 'customer',
+  };
+
   // Initial Auth Check
   useEffect(() => {
     const initAuth = async () => {
       setIsAuthLoading(true);
       initializeStorage();
       try {
-        const user = await getCurrentUser();
+        let user = await getCurrentUser();
         const admin = await getCurrentAdmin();
-        if (user) {
-          setCurrentUser(user);
-          await loadCustomerData(user.id);
+        if (!user) {
+          const cached = localStorage.getItem('traculator_current_user_v1');
+          if (cached) {
+            try {
+              user = JSON.parse(cached);
+            } catch (e) {
+              user = null;
+            }
+          }
+          if (!user) {
+            user = DEFAULT_LOCAL_OPERATOR;
+            localStorage.setItem('traculator_current_user_v1', JSON.stringify(DEFAULT_LOCAL_OPERATOR));
+          }
         }
+        setCurrentUser(user);
+        await loadCustomerData(user.id);
         if (admin) {
           setAdminUser(admin);
         }
       } catch (err) {
         console.error('Auth initialization error:', err);
+        setCurrentUser(DEFAULT_LOCAL_OPERATOR);
+        await loadCustomerData(DEFAULT_LOCAL_OPERATOR.id);
       } finally {
         setIsAuthLoading(false);
       }
@@ -127,7 +154,22 @@ export default function App() {
     }
   };
 
-  const activeCustomer = customersQueue.find((c) => c.id === activeCustomerId) || customersQueue[0] || null;
+  const fallbackCustomer = {
+    id: 'QUICK-FIELD-01',
+    customerName: 'Direct Field Customer',
+    mobileNumber: '',
+    address: '',
+    location: 'Field Work',
+    workDescription: 'Standard Agricultural Tractor Work',
+    ratePerMinute: Number(currentUser?.defaultRate || currentUser?.default_rate) || 100,
+    timerMode: timerState.mode || 'stopwatch',
+    durationMinutesPreset: 20,
+    status: 'in_progress',
+    createdAt: new Date().toISOString(),
+    expenses: { diesel: 0, driver: 0, food: 0, other: 0 },
+  };
+
+  const activeCustomer = customersQueue.find((c) => c.id === activeCustomerId) || customersQueue[0] || fallbackCustomer;
 
   // Background-Safe Timer Engine (wall-clock based)
   useEffect(() => {
@@ -287,8 +329,8 @@ export default function App() {
   };
 
   const handleStartCustomerWork = async (newCustomer) => {
-    if (!currentUser) return;
-    const updated = await saveQueuedCustomer(currentUser.id, newCustomer);
+    const effectiveUser = currentUser || DEFAULT_LOCAL_OPERATOR;
+    const updated = await saveQueuedCustomer(effectiveUser.id, newCustomer);
     setCustomersQueue(updated);
     setActiveCustId(newCustomer.id);
     setActiveTab('diary');
@@ -307,16 +349,16 @@ export default function App() {
   };
 
   const handleSaveToQueue = async (newCustomer) => {
-    if (!currentUser) return;
-    const updated = await saveQueuedCustomer(currentUser.id, newCustomer);
+    const effectiveUser = currentUser || DEFAULT_LOCAL_OPERATOR;
+    const updated = await saveQueuedCustomer(effectiveUser.id, newCustomer);
     setCustomersQueue(updated);
     setActiveTab('diary');
     showToast(`Added ${newCustomer.customerName} to work queue`);
   };
 
   const handleUpdateCustomer = async (updatedCust) => {
-    if (!currentUser) return;
-    const updated = await saveQueuedCustomer(currentUser.id, updatedCust);
+    const effectiveUser = currentUser || DEFAULT_LOCAL_OPERATOR;
+    const updated = await saveQueuedCustomer(effectiveUser.id, updatedCust);
     setCustomersQueue(updated);
   };
 
@@ -335,38 +377,44 @@ export default function App() {
   };
 
   const handleSaveCompletedJob = async (finalRecord, isPdfDownloaded) => {
-    if (!currentUser) return;
+    const effectiveUser = currentUser || DEFAULT_LOCAL_OPERATOR;
 
-    // 1. Save to Supabase
-    const updatedRecords = await saveUserJob(currentUser.id, finalRecord);
-    setCompletedRecords(updatedRecords);
-
-    // 2. Reset active timer
-    handleResetTimer();
-
-    // 3. Remove customer from queue
-    if (activeCustomer) {
-      const updatedQueue = await removeQueuedCustomer(currentUser.id, activeCustomer.id);
-      setCustomersQueue(updatedQueue);
-      if (updatedQueue.length > 0) {
-        setActiveCustId(updatedQueue[0].id);
-      } else {
-        setActiveCustId('');
-      }
-    }
-
-    // 4. Close modal and notify
+    // Immediately close modal
     setCompleteJobState(null);
-    showToast(
-      isPdfDownloaded
-        ? `Job saved permanently & PDF bill downloaded!`
-        : `Job for ${finalRecord.customerName} saved permanently!`
-    );
+
+    try {
+      // 1. Save to Supabase & Local Cache (Permanent in APK)
+      const updatedRecords = await saveUserJob(effectiveUser.id, finalRecord);
+      setCompletedRecords(updatedRecords);
+
+      // 2. Reset active timer
+      handleResetTimer();
+
+      // 3. Remove customer from queue if in queue
+      if (activeCustomer && customersQueue.some(c => c.id === activeCustomer.id)) {
+        const updatedQueue = await removeQueuedCustomer(effectiveUser.id, activeCustomer.id);
+        setCustomersQueue(updatedQueue);
+        if (updatedQueue.length > 0) {
+          setActiveCustId(updatedQueue[0].id);
+        } else {
+          setActiveCustId('');
+        }
+      }
+
+      showToast(
+        isPdfDownloaded
+          ? `Job saved & PDF bill downloaded!`
+          : `Job for ${finalRecord.customerName} saved permanently!`
+      );
+    } catch (err) {
+      console.error('Failed to save job:', err);
+      showToast(`Saved locally. (${err.message})`);
+    }
   };
 
   const handleDeleteRecord = async (recordId) => {
-    if (!currentUser) return;
-    const updated = await deleteUserJob(currentUser.id, recordId);
+    const effectiveUser = currentUser || DEFAULT_LOCAL_OPERATOR;
+    const updated = await deleteUserJob(effectiveUser.id, recordId);
     setCompletedRecords(updated);
     if (selectedRecordForDetails?.id === recordId) {
       setSelectedRecordForDetails(null);
@@ -375,11 +423,13 @@ export default function App() {
   };
 
   const handleUpdateRecord = async (updatedRecord) => {
-    if (!currentUser) return;
-    const updated = await updateUserJob(currentUser.id, updatedRecord);
+    const effectiveUser = currentUser || DEFAULT_LOCAL_OPERATOR;
+    const updated = await updateUserJob(effectiveUser.id, updatedRecord);
     setCompletedRecords(updated);
-    setSelectedRecordForDetails(updatedRecord);
-    showToast('Job record updated successfully');
+    if (selectedRecordForDetails?.id === updatedRecord.id) {
+      setSelectedRecordForDetails(updatedRecord);
+    }
+    showToast('Record updated successfully');
   };
 
   // Active Timer Payload for Diary Display

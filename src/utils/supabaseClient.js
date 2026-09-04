@@ -23,7 +23,7 @@ export const supabase = isSupabaseConfigured()
   : null;
 
 /**
- * Normalizes identifier into an email for Supabase authentication
+ * Normalizes identifier (Email or Mobile Phone) into a valid email string for Supabase Authentication
  */
 export function normalizeAuthIdentifier(identifier) {
   if (!identifier) return '';
@@ -37,12 +37,30 @@ export function normalizeAuthIdentifier(identifier) {
 }
 
 /**
- * Customer Sign Up (Using only Email or Mobile Number + Password)
+ * Customer Sign Up (Using Supabase Auth + profiles table)
+ * Columns: id (uuid), name (text), phone (text), email (text), address (text)
  */
-export async function signUpCustomer({ identifier, password }) {
-  const loginEmail = normalizeAuthIdentifier(identifier);
-  const isPhone = !identifier.includes('@');
-  const displayName = isPhone ? identifier : identifier.split('@')[0];
+export async function signUpCustomer({
+  name = '',
+  fullName = '',
+  email = '',
+  phone = '',
+  mobileNumber = '',
+  address = '',
+  location = '',
+  defaultRate = 100,
+  password = '',
+  identifier = '',
+}) {
+  const cleanName = (name || fullName || 'Operator').trim();
+  const cleanEmail = (email || (identifier.includes('@') ? identifier : '')).trim();
+  const cleanPhone = (phone || mobileNumber || (!identifier.includes('@') ? identifier : '')).trim();
+  const cleanAddress = (address || location || '').trim();
+  const effectiveIdentifier = (cleanEmail || cleanPhone || identifier || '').trim();
+  const loginEmail = normalizeAuthIdentifier(effectiveIdentifier);
+
+  let createdUserId = `usr_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+  let authUser = null;
 
   if (isSupabaseConfigured() && supabase) {
     const { data: authData, error: authError } = await supabase.auth.signUp({
@@ -50,10 +68,13 @@ export async function signUpCustomer({ identifier, password }) {
       password,
       options: {
         data: {
-          full_name: displayName,
-          mobile_number: isPhone ? identifier : '',
-          email: identifier.includes('@') ? identifier : '',
-          role: 'customer',
+          name: cleanName,
+          full_name: cleanName,
+          phone: cleanPhone,
+          mobile_number: cleanPhone,
+          email: cleanEmail,
+          address: cleanAddress,
+          location: cleanAddress,
         },
       },
     });
@@ -61,52 +82,54 @@ export async function signUpCustomer({ identifier, password }) {
     if (authError) throw authError;
 
     if (authData?.user) {
+      authUser = authData.user;
+      createdUserId = authData.user.id;
+
+      // Upsert to profiles table
       const { error: profileError } = await supabase.from('profiles').upsert({
         id: authData.user.id,
-        customer_id: displayName,
-        full_name: displayName,
-        mobile_number: isPhone ? identifier : '',
-        location: '',
-        default_rate: 100,
-        role: 'customer',
+        name: cleanName,
+        phone: cleanPhone,
+        email: cleanEmail,
+        address: cleanAddress,
         updated_at: new Date().toISOString(),
       });
 
-      if (profileError) console.error('Error creating profile:', profileError);
+      if (profileError) console.warn('Profile table upsert note:', profileError);
     }
-
-    return { user: authData.user };
-  } else {
-    // Local persistence fallback
-    const mockUsers = JSON.parse(localStorage.getItem('traculator_mock_users_v1') || '[]');
-    
-    if (mockUsers.some(u => u.email === loginEmail || u.identifier === identifier)) {
-      throw new Error('An account with this Email or Mobile Number already exists. Please sign in.');
-    }
-
-    const newUser = {
-      id: `usr_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
-      email: loginEmail,
-      identifier,
-      password,
-      fullName: displayName,
-      mobileNumber: isPhone ? identifier : '',
-      location: '',
-      defaultRate: 100,
-      role: 'customer',
-      createdAt: new Date().toISOString(),
-    };
-
-    mockUsers.push(newUser);
-    localStorage.setItem('traculator_mock_users_v1', JSON.stringify(mockUsers));
-    localStorage.setItem('traculator_current_user_v1', JSON.stringify(newUser));
-
-    return { user: newUser };
   }
+
+  // Unified User Profile Object (Without public usernames or displaying internal id)
+  const userObj = {
+    id: createdUserId,
+    name: cleanName,
+    fullName: cleanName,
+    phone: cleanPhone,
+    mobileNumber: cleanPhone,
+    email: cleanEmail || loginEmail,
+    address: cleanAddress,
+    location: cleanAddress,
+    defaultRate: Number(defaultRate) || 100,
+    role: 'customer',
+    createdAt: new Date().toISOString(),
+  };
+
+  // Mirror to local device storage for offline resilience
+  const mockUsers = JSON.parse(localStorage.getItem('traculator_mock_users_v1') || '[]');
+  const existingIdx = mockUsers.findIndex(u => u.id === userObj.id || (u.email && u.email.toLowerCase() === loginEmail.toLowerCase()));
+  if (existingIdx >= 0) {
+    mockUsers[existingIdx] = { ...mockUsers[existingIdx], ...userObj };
+  } else {
+    mockUsers.push(userObj);
+  }
+  localStorage.setItem('traculator_mock_users_v1', JSON.stringify(mockUsers));
+  localStorage.setItem('traculator_current_user_v1', JSON.stringify(userObj));
+
+  return { user: userObj };
 }
 
 /**
- * Customer Sign In (Using only Email or Mobile Number + Password)
+ * Customer Sign In (Using Email OR Mobile Phone + Password)
  */
 export async function signInCustomer({ identifier, password }) {
   const loginEmail = normalizeAuthIdentifier(identifier);
@@ -119,25 +142,54 @@ export async function signInCustomer({ identifier, password }) {
 
     if (error) throw error;
 
-    // Fetch profile
+    // Fetch profile row from public.profiles
     const { data: profile } = await supabase
       .from('profiles')
       .select('*')
       .eq('id', data.user.id)
       .maybeSingle();
 
-    return { user: data.user, profile };
+    const cleanName = profile?.name || profile?.full_name || data.user?.user_metadata?.name || data.user?.user_metadata?.full_name || 'Operator';
+    const cleanPhone = profile?.phone || profile?.mobile_number || data.user?.user_metadata?.phone || data.user?.user_metadata?.mobile_number || '';
+    const cleanEmail = profile?.email || data.user?.email || '';
+    const cleanAddress = profile?.address || profile?.location || data.user?.user_metadata?.address || data.user?.user_metadata?.location || '';
+
+    const mergedUser = {
+      ...data.user,
+      name: cleanName,
+      fullName: cleanName,
+      phone: cleanPhone,
+      mobileNumber: cleanPhone,
+      email: cleanEmail,
+      address: cleanAddress,
+      location: cleanAddress,
+      defaultRate: 100,
+      role: 'customer',
+    };
+
+    // Mirror to local storage
+    const mockUsers = JSON.parse(localStorage.getItem('traculator_mock_users_v1') || '[]');
+    const existingIdx = mockUsers.findIndex(u => u.id === mergedUser.id);
+    if (existingIdx >= 0) {
+      mockUsers[existingIdx] = { ...mockUsers[existingIdx], ...mergedUser };
+    } else {
+      mockUsers.push(mergedUser);
+    }
+    localStorage.setItem('traculator_mock_users_v1', JSON.stringify(mockUsers));
+    localStorage.setItem('traculator_current_user_v1', JSON.stringify(mergedUser));
+
+    return { user: mergedUser, profile };
   } else {
     // Local persistence fallback
     const mockUsers = JSON.parse(localStorage.getItem('traculator_mock_users_v1') || '[]');
 
     const user = mockUsers.find(
-      u => (u.email.toLowerCase() === loginEmail || u.identifier === identifier) &&
+      u => (u.email.toLowerCase() === loginEmail || u.phone === identifier || u.identifier === identifier) &&
            u.password === password
     );
 
     if (!user) {
-      throw new Error('Invalid Email/Mobile Number or Password.');
+      throw new Error('Invalid Email/Phone Number or Password.');
     }
 
     localStorage.setItem('traculator_current_user_v1', JSON.stringify(user));
@@ -146,7 +198,7 @@ export async function signInCustomer({ identifier, password }) {
 }
 
 /**
- * Admin Sign In
+ * Admin Sign In (Isolated at #admin)
  */
 export async function signInAdmin({ email, password }) {
   // Master Admin Credentials
@@ -157,6 +209,7 @@ export async function signInAdmin({ email, password }) {
     const adminUser = {
       id: 'admin_master_001',
       email: 'admin@traculator.in',
+      name: 'TRACULATOR Master Admin',
       fullName: 'TRACULATOR Master Admin',
       role: 'admin',
     };
@@ -184,7 +237,9 @@ export async function signInAdmin({ email, password }) {
       throw new Error('Access Denied: You do not have administrator permissions.');
     }
 
-    return { user: data.user, profile };
+    const adminObj = { ...data.user, ...profile };
+    localStorage.setItem('traculator_admin_user_v1', JSON.stringify(adminObj));
+    return { user: adminObj, profile };
   } else {
     throw new Error('Invalid Admin Credentials.');
   }
@@ -207,7 +262,10 @@ export async function signOutUser() {
 export async function getCurrentUser() {
   if (isSupabaseConfigured() && supabase) {
     const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.user) return null;
+    if (!session?.user) {
+      const userStr = localStorage.getItem('traculator_current_user_v1');
+      return userStr ? JSON.parse(userStr) : null;
+    }
 
     const { data: profile } = await supabase
       .from('profiles')
@@ -215,7 +273,23 @@ export async function getCurrentUser() {
       .eq('id', session.user.id)
       .maybeSingle();
 
-    return { ...session.user, ...profile };
+    const cleanName = profile?.name || profile?.full_name || session.user?.user_metadata?.name || session.user?.user_metadata?.full_name || 'Operator';
+    const cleanPhone = profile?.phone || profile?.mobile_number || session.user?.user_metadata?.phone || session.user?.user_metadata?.mobile_number || '';
+    const cleanEmail = profile?.email || session.user?.email || '';
+    const cleanAddress = profile?.address || profile?.location || session.user?.user_metadata?.address || session.user?.user_metadata?.location || '';
+
+    return {
+      ...session.user,
+      name: cleanName,
+      fullName: cleanName,
+      phone: cleanPhone,
+      mobileNumber: cleanPhone,
+      email: cleanEmail,
+      address: cleanAddress,
+      location: cleanAddress,
+      defaultRate: 100,
+      role: 'customer',
+    };
   } else {
     const userStr = localStorage.getItem('traculator_current_user_v1');
     return userStr ? JSON.parse(userStr) : null;

@@ -68,6 +68,7 @@ export default function CompleteJobModal({
     playClickFeedback();
     const finalRecord = buildFinalRecord();
     onSave(finalRecord, false);
+    if (onClose) onClose();
   };
 
   const handleSaveAndPDF = () => {
@@ -75,6 +76,7 @@ export default function CompleteJobModal({
     const finalRecord = buildFinalRecord();
     generateCustomerBillPDF(finalRecord);
     onSave(finalRecord, true);
+    if (onClose) onClose();
   };
 
   const handleConfirmCancel = () => {

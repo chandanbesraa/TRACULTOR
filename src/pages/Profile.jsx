@@ -11,16 +11,15 @@ export default function Profile({
   onLogout,
 }) {
   const [isEditing, setIsEditing] = useState(false);
-  const [fullName, setFullName] = useState(currentUser?.fullName || currentUser?.full_name || 'Operator');
-  const [mobileNumber, setMobileNumber] = useState(currentUser?.mobileNumber || currentUser?.mobile_number || '');
-  const [location, setLocation] = useState(currentUser?.location || '');
+  const [name, setName] = useState(currentUser?.name || currentUser?.fullName || currentUser?.full_name || 'Operator');
+  const [phone, setPhone] = useState(currentUser?.phone || currentUser?.mobileNumber || currentUser?.mobile_number || '');
+  const [email, setEmail] = useState(currentUser?.email || '');
+  const [address, setAddress] = useState(currentUser?.address || currentUser?.location || '');
   const [defaultRate, setDefaultRate] = useState(currentUser?.defaultRate || currentUser?.default_rate || 100);
 
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
-
-  const userEmail = currentUser?.email || '';
 
   // Calculate user lifetime stats
   const totalJobs = completedRecords.length;
@@ -34,10 +33,15 @@ export default function Profile({
     setSaving(true);
     try {
       const updates = {
-        fullName: fullName.trim(),
-        mobileNumber: mobileNumber.trim(),
-        location: location.trim(),
+        name: name.trim(),
+        phone: phone.trim(),
+        email: email.trim(),
+        address: address.trim(),
         defaultRate: Number(defaultRate) || 100,
+        // Legacy compatibility mappings
+        fullName: name.trim(),
+        mobileNumber: phone.trim(),
+        location: address.trim(),
       };
 
       await updateUserProfile(currentUser.id, updates);
@@ -61,16 +65,16 @@ export default function Profile({
   };
 
   return (
-    <div className="space-y-4 pb-12">
+    <div className="space-y-4 pb-12 select-none">
       {/* Profile Header Banner */}
       <div className="bg-white border-b border-[#E2E2DC] -mx-4 -mt-4 px-4 py-4 mb-2 shadow-xs">
         <div className="max-w-2xl mx-auto flex items-center justify-between">
           <div>
             <div className="text-[10px] uppercase font-bold tracking-wider text-gray-500">
-              Customer Account
+              Authenticated Profile
             </div>
             <h2 className="text-lg sm:text-xl font-black text-[#1A1A1A]">
-              Operator Profile
+              Customer Profile
             </h2>
           </div>
           <button
@@ -89,32 +93,32 @@ export default function Profile({
         </div>
       )}
 
-      {/* Main Profile Card (Social-Media Style) */}
+      {/* Main Profile Card */}
       <div className="card-base bg-white border-2 border-[#1F5E3B]/20 p-5 space-y-4 shadow-sm">
         <div className="flex items-start justify-between">
           <div className="flex items-center gap-3.5">
-            {/* Avatar Pill */}
-            <div className="w-14 h-14 rounded-2xl bg-[#1F5E3B] text-white flex items-center justify-center font-black text-2xl shadow-md border-2 border-emerald-600">
-              {fullName ? fullName.charAt(0).toUpperCase() : 'O'}
+            {/* Avatar */}
+            <div className="w-14 h-14 rounded-2xl bg-[#1F5E3B] text-white flex items-center justify-center font-black text-2xl shadow-md border-2 border-emerald-600 shrink-0">
+              {name ? name.charAt(0).toUpperCase() : 'O'}
             </div>
             <div>
               <div className="flex items-center gap-2">
                 <h3 className="text-lg sm:text-xl font-black text-gray-900 leading-tight">
-                  {fullName}
+                  {name}
                 </h3>
                 <span className="inline-flex items-center gap-0.5 text-[10px] font-bold bg-emerald-100 text-[#1F5E3B] px-2 py-0.5 rounded-full">
-                  <ShieldCheck className="w-3 h-3" /> Verified
+                  <ShieldCheck className="w-3 h-3" /> Authenticated
                 </span>
               </div>
               <div className="text-xs text-gray-500 font-medium mt-0.5">
-                {mobileNumber || userEmail || 'Registered Operator'}
+                {email || phone || 'Registered Account'}
               </div>
             </div>
           </div>
 
           <button
             onClick={() => setIsEditing(!isEditing)}
-            className="p-2 rounded-xl bg-[#F7F7F5] hover:bg-gray-200 text-gray-700 text-xs font-bold flex items-center gap-1 border border-gray-300"
+            className="p-2 rounded-xl bg-[#F7F7F5] hover:bg-gray-200 text-gray-700 text-xs font-bold flex items-center gap-1 border border-gray-300 shrink-0"
           >
             <Edit3 className="w-3.5 h-3.5" />
             <span className="hidden sm:inline">{isEditing ? 'Cancel' : 'Edit'}</span>
@@ -127,23 +131,31 @@ export default function Profile({
             <div className="flex items-center gap-2 bg-[#F7F7F5] p-3 rounded-xl border border-gray-200">
               <Phone className="w-4 h-4 text-[#1F5E3B]" />
               <div>
-                <span className="text-[10px] uppercase font-bold text-gray-500 block">Mobile Number</span>
-                <span className="font-bold text-gray-900">{mobileNumber || 'Not provided'}</span>
+                <span className="text-[10px] uppercase font-bold text-gray-500 block">Phone Number</span>
+                <span className="font-bold text-gray-900">{phone || 'Not provided'}</span>
               </div>
             </div>
 
             <div className="flex items-center gap-2 bg-[#F7F7F5] p-3 rounded-xl border border-gray-200">
+              <Mail className="w-4 h-4 text-[#1F5E3B]" />
+              <div>
+                <span className="text-[10px] uppercase font-bold text-gray-500 block">Email Address</span>
+                <span className="font-bold text-gray-900">{email || 'Not provided'}</span>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 bg-[#F7F7F5] p-3 rounded-xl border border-gray-200 sm:col-span-2">
               <MapPin className="w-4 h-4 text-[#1F5E3B]" />
               <div>
-                <span className="text-[10px] uppercase font-bold text-gray-500 block">Field / Location</span>
-                <span className="font-bold text-gray-900">{location || 'Not provided'}</span>
+                <span className="text-[10px] uppercase font-bold text-gray-500 block">Address</span>
+                <span className="font-bold text-gray-900">{address || 'Not provided'}</span>
               </div>
             </div>
 
             <div className="flex items-center gap-2 bg-[#F7F7F5] p-3 rounded-xl border border-gray-200 sm:col-span-2">
               <IndianRupee className="w-4 h-4 text-[#1F5E3B]" />
               <div>
-                <span className="text-[10px] uppercase font-bold text-gray-500 block">Default Tractor Rate</span>
+                <span className="text-[10px] uppercase font-bold text-gray-500 block">Default Agreed Rate</span>
                 <span className="font-black text-sm font-timer text-[#1F5E3B]">
                   ₹{defaultRate} / min <span className="text-xs font-normal text-gray-500">(₹{defaultRate * 60}/hr)</span>
                 </span>
@@ -153,37 +165,48 @@ export default function Profile({
         ) : (
           <form onSubmit={handleSaveProfile} className="space-y-3 pt-3 border-t border-[#E2E2DC]">
             <div>
-              <label className="text-xs font-bold text-gray-800">Full Name</label>
+              <label className="text-xs font-bold text-gray-800">Name</label>
               <input
                 type="text"
-                value={fullName}
-                onChange={(e) => setFullName(e.target.value)}
-                placeholder="Operator Name"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="Your Name"
                 className="w-full bg-[#F7F7F5] border border-gray-300 rounded-xl px-3.5 py-2 text-sm font-bold text-gray-900 focus:bg-white focus:border-[#1F5E3B] outline-none mt-0.5"
               />
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
               <div>
-                <label className="text-xs font-bold text-gray-800">Mobile Number</label>
+                <label className="text-xs font-bold text-gray-800">Phone</label>
                 <input
                   type="tel"
-                  value={mobileNumber}
-                  onChange={(e) => setMobileNumber(e.target.value)}
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value)}
                   placeholder="e.g. +91 98765 43210"
                   className="w-full bg-[#F7F7F5] border border-gray-300 rounded-xl px-3.5 py-2 text-xs font-bold text-gray-900 focus:bg-white focus:border-[#1F5E3B] outline-none mt-0.5"
                 />
               </div>
               <div>
-                <label className="text-xs font-bold text-gray-800">Location / Village</label>
+                <label className="text-xs font-bold text-gray-800">Email</label>
                 <input
-                  type="text"
-                  value={location}
-                  onChange={(e) => setLocation(e.target.value)}
-                  placeholder="e.g. Asansol, West Bengal"
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="e.g. operator@gmail.com"
                   className="w-full bg-[#F7F7F5] border border-gray-300 rounded-xl px-3.5 py-2 text-xs font-semibold text-gray-900 focus:bg-white focus:border-[#1F5E3B] outline-none mt-0.5"
                 />
               </div>
+            </div>
+
+            <div>
+              <label className="text-xs font-bold text-gray-800">Address</label>
+              <input
+                type="text"
+                value={address}
+                onChange={(e) => setAddress(e.target.value)}
+                placeholder="e.g. Asansol, West Bengal"
+                className="w-full bg-[#F7F7F5] border border-gray-300 rounded-xl px-3.5 py-2 text-xs font-semibold text-gray-900 focus:bg-white focus:border-[#1F5E3B] outline-none mt-0.5"
+              />
             </div>
 
             <div>
@@ -220,7 +243,7 @@ export default function Profile({
       {/* Lifetime Account Performance Stats */}
       <div className="space-y-2">
         <div className="text-xs font-bold uppercase tracking-wider text-gray-500 px-1">
-          Lifetime Account Performance
+          Account Performance
         </div>
 
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 text-center">
@@ -250,14 +273,14 @@ export default function Profile({
         </div>
       </div>
 
-      {/* Cloud Sync & Persistence Status Box */}
+      {/* Cloud Sync & Security Box */}
       <div className="card-base bg-emerald-50/60 border border-emerald-200 p-3.5 flex items-center justify-between text-xs">
         <div className="flex items-center gap-2 text-emerald-900 font-semibold">
           <ShieldCheck className="w-4 h-4 text-[#1F5E3B]" />
-          <span>Cloud Data Protected with Supabase</span>
+          <span>Profile Secured with Supabase Row Level Security</span>
         </div>
         <span className="text-[10px] font-bold bg-white text-[#1F5E3B] px-2 py-0.5 rounded-full border border-emerald-200">
-          Auto-Synced
+          Private
         </span>
       </div>
 
@@ -270,7 +293,7 @@ export default function Profile({
             </div>
             <h4 className="text-base font-bold text-gray-900 mb-1">Log out of TRACULATOR?</h4>
             <p className="text-xs text-gray-600 mb-5">
-              Your tractor records, history, and earnings are safely stored in your account and will reload when you sign back in.
+              Your tractor records, history, and earnings are securely stored in your account and will reload when you sign back in.
             </p>
             <div className="flex gap-2.5">
               <button

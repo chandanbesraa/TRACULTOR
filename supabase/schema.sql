@@ -1,26 +1,71 @@
--- TRACULATOR Supabase Database Schema & Row Level Security (RLS) Policies
--- Run this SQL in your Supabase Project SQL Editor
+-- =========================================================
+-- TRACULATOR Supabase Database Schema & Row Level Security (RLS)
+-- =========================================================
 
--- 1. Profiles Table (Customer Accounts & Admin Roles)
+-- 1. Profiles Table (Stores authenticated user profile info without username/handle)
 create table if not exists public.profiles (
-  id uuid references auth.users on delete cascade primary key,
-  customer_id text unique not null,
-  full_name text not null,
-  mobile_number text,
-  location text,
-  default_rate numeric default 100,
-  role text default 'customer' check (role in ('customer', 'admin')),
+  id uuid references auth.users(id) on delete cascade primary key,
+  name text,
+  phone text,
+  email text,
+  address text,
   created_at timestamp with time zone default timezone('utc'::text, now()) not null,
   updated_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
 
--- Index on customer_id for fast lookup
-create index if not exists idx_profiles_customer_id on public.profiles(customer_id);
+-- Enable RLS on profiles
+alter table public.profiles enable row level security;
 
--- 2. Jobs Table (Completed Tractor Work History Records)
+-- Profiles Policies (Each authenticated user can only view and update their own profile)
+create policy "Users can view own profile"
+  on public.profiles for select
+  using (auth.uid() = id);
+
+create policy "Users can insert own profile"
+  on public.profiles for insert
+  with check (auth.uid() = id);
+
+create policy "Users can update own profile"
+  on public.profiles for update
+  using (auth.uid() = id)
+  with check (auth.uid() = id);
+
+-- 2. Automatic Profile Creation Trigger for every newly registered auth.users record
+create or replace function public.handle_new_user()
+returns trigger as $$
+begin
+  insert into public.profiles (id, name, phone, email, address, created_at, updated_at)
+  values (
+    new.id,
+    coalesce(new.raw_user_meta_data->>'name', new.raw_user_meta_data->>'full_name', ''),
+    coalesce(new.raw_user_meta_data->>'phone', new.raw_user_meta_data->>'mobile_number', new.phone, ''),
+    coalesce(new.email, ''),
+    coalesce(new.raw_user_meta_data->>'address', new.raw_user_meta_data->>'location', ''),
+    now(),
+    now()
+  )
+  on conflict (id) do update set
+    name = coalesce(excluded.name, profiles.name),
+    phone = coalesce(excluded.phone, profiles.phone),
+    email = coalesce(excluded.email, profiles.email),
+    address = coalesce(excluded.address, profiles.address),
+    updated_at = now();
+  return new;
+end;
+$$ language plpgsql security definer;
+
+-- Trigger to execute automatically after registration
+drop trigger if exists on_auth_user_created on auth.users;
+create trigger on_auth_user_created
+  after insert on auth.users
+  for each row execute function public.handle_new_user();
+
+-- =========================================================
+-- 3. Jobs Table (Completed Work Records)
+-- =========================================================
 create table if not exists public.jobs (
   id text primary key,
-  user_id uuid references public.profiles(id) on delete cascade not null,
+  user_id uuid references auth.users(id) on delete cascade not null,
   customer_name text not null,
   mobile_number text,
   address text,
@@ -41,14 +86,33 @@ create table if not exists public.jobs (
   created_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
 
--- Indexes for performance
 create index if not exists idx_jobs_user_id on public.jobs(user_id);
 create index if not exists idx_jobs_date on public.jobs(date);
 
--- 3. Customer Queue Table (Pending & In-Progress Customers)
+alter table public.jobs enable row level security;
+
+create policy "Users can select own jobs"
+  on public.jobs for select
+  using (auth.uid() = user_id);
+
+create policy "Users can insert own jobs"
+  on public.jobs for insert
+  with check (auth.uid() = user_id);
+
+create policy "Users can update own jobs"
+  on public.jobs for update
+  using (auth.uid() = user_id);
+
+create policy "Users can delete own jobs"
+  on public.jobs for delete
+  using (auth.uid() = user_id);
+
+-- =========================================================
+-- 4. Customer Queue Table (Pending & In-Progress Customers)
+-- =========================================================
 create table if not exists public.customer_queue (
   id text primary key,
-  user_id uuid references public.profiles(id) on delete cascade not null,
+  user_id uuid references auth.users(id) on delete cascade not null,
   customer_name text not null,
   mobile_number text,
   address text,
@@ -64,60 +128,11 @@ create table if not exists public.customer_queue (
 
 create index if not exists idx_queue_user_id on public.customer_queue(user_id);
 
--- =========================================================
--- ROW LEVEL SECURITY (RLS) POLICIES
--- =========================================================
-
--- Enable RLS
-alter table public.profiles enable row level security;
-alter table public.jobs enable row level security;
 alter table public.customer_queue enable row level security;
 
--- Helper function to check if current user is Admin
-create or replace function public.is_admin()
-returns boolean as $$
-begin
-  return exists (
-    select 1 from public.profiles
-    where id = auth.uid() and role = 'admin'
-  );
-end;
-$$ language plpgsql security definer;
-
--- Profiles Policies
-create policy "Users can view own profile or admins view all"
-  on public.profiles for select
-  using (auth.uid() = id or public.is_admin());
-
-create policy "Users can insert own profile"
-  on public.profiles for insert
-  with check (auth.uid() = id);
-
-create policy "Users can update own profile or admins update all"
-  on public.profiles for update
-  using (auth.uid() = id or public.is_admin());
-
--- Jobs Policies (Strict Isolation: Customers only see their own jobs)
-create policy "Users can select own jobs or admins view all"
-  on public.jobs for select
-  using (auth.uid() = user_id or public.is_admin());
-
-create policy "Users can insert own jobs"
-  on public.jobs for insert
-  with check (auth.uid() = user_id);
-
-create policy "Users can update own jobs"
-  on public.jobs for update
-  using (auth.uid() = user_id or public.is_admin());
-
-create policy "Users can delete own jobs"
-  on public.jobs for delete
-  using (auth.uid() = user_id or public.is_admin());
-
--- Customer Queue Policies
-create policy "Users can select own queue or admins view all"
+create policy "Users can select own queue"
   on public.customer_queue for select
-  using (auth.uid() = user_id or public.is_admin());
+  using (auth.uid() = user_id);
 
 create policy "Users can insert own queue"
   on public.customer_queue for insert
@@ -125,8 +140,8 @@ create policy "Users can insert own queue"
 
 create policy "Users can update own queue"
   on public.customer_queue for update
-  using (auth.uid() = user_id or public.is_admin());
+  using (auth.uid() = user_id);
 
 create policy "Users can delete own queue"
   on public.customer_queue for delete
-  using (auth.uid() = user_id or public.is_admin());
+  using (auth.uid() = user_id);
