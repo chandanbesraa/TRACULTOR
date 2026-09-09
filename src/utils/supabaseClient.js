@@ -201,16 +201,20 @@ export async function signInCustomer({ identifier, password }) {
 
 /**
  * Resolves the authentication redirect URL dynamically based on the current origin.
- * Automatically adapts between local development (http://localhost:3000) and production (https://traculator.vercel.app).
+ * Automatically adapts between local development (http://localhost:3000) and production (https://tracultor.vercel.app).
  */
 export function getAuthRedirectUrl() {
-  if (typeof window !== 'undefined' && window.location && window.location.origin) {
+  if (typeof window !== 'undefined' && window.location) {
     const origin = window.location.origin;
-    if (origin.startsWith('http://') || origin.startsWith('https://')) {
+    if (origin && (origin.startsWith('http://') || origin.startsWith('https://')) && origin !== 'null') {
       return origin;
     }
+    // Fallback: build from protocol and host
+    if (window.location.protocol && window.location.host) {
+      return `${window.location.protocol}//${window.location.host}`;
+    }
   }
-  return 'https://traculator.vercel.app';
+  return 'https://tracultor.vercel.app';
 }
 
 /**
