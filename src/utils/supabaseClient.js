@@ -263,8 +263,7 @@ export async function getCurrentUser() {
   if (isSupabaseConfigured() && supabase) {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session?.user) {
-      const userStr = localStorage.getItem('traculator_current_user_v1');
-      return userStr ? JSON.parse(userStr) : null;
+      return null;
     }
 
     const { data: profile } = await supabase

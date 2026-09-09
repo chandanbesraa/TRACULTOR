@@ -3,19 +3,19 @@ import { supabase, isSupabaseConfigured } from './supabaseClient';
 /**
  * Storage Keys for Local Offline Mirroring & Fast APK Startup
  */
-const getUserStorageKey = (userId, prefix) => `traculator_${prefix}_${userId || 'local_operator'}`;
+export const getUserStorageKey = (userId, prefix) => `traculator_${prefix}_${userId || 'local_operator'}`;
 
 /**
  * Helper to check valid UUID
  */
-function isValidUuid(id) {
+export function isValidUuid(id) {
   return typeof id === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
 }
 
 /**
  * Helper to ensure safe ISO date string
  */
-function safeIsoDate(val) {
+export function safeIsoDate(val) {
   if (!val) return new Date().toISOString();
   try {
     const d = new Date(val);
@@ -26,10 +26,24 @@ function safeIsoDate(val) {
 }
 
 /**
+ * Helper to merge two arrays of objects by unique 'id', preferring primary
+ */
+export function mergeRecordsById(primary = [], secondary = []) {
+  const map = new Map();
+  (secondary || []).forEach(item => {
+    if (item && item.id) map.set(item.id, item);
+  });
+  (primary || []).forEach(item => {
+    if (item && item.id) map.set(item.id, item);
+  });
+  return Array.from(map.values());
+}
+
+/**
  * Helper to ensure a profile row exists in public.profiles before foreign key operations
  * Columns: id (uuid), name (text), phone (text), email (text), address (text)
  */
-async function ensureProfileExists(userId) {
+export async function ensureProfileExists(userId) {
   if (!isSupabaseConfigured() || !supabase || !isValidUuid(userId)) return;
   try {
     const { data: existing } = await supabase
@@ -62,13 +76,104 @@ async function ensureProfileExists(userId) {
 }
 
 /**
+ * Synchronize full user account state to Supabase cloud (user_metadata + cloud sync)
+ * Ensures 100% cross-device transfer of jobs, queue, payments, and profiles.
+ */
+let syncTimer = null;
+export async function syncAccountPayloadToSupabase(userId, immediate = false) {
+  if (!isSupabaseConfigured() || !supabase || !isValidUuid(userId)) return;
+
+  const performSync = async () => {
+    try {
+      const jobsKey = getUserStorageKey(userId, 'jobs');
+      const queueKey = getUserStorageKey(userId, 'queue');
+      const paymentsKey = getUserStorageKey(userId, 'payments');
+      const profilesKey = getUserStorageKey(userId, 'customer_profiles');
+
+      const jobs = JSON.parse(localStorage.getItem(jobsKey) || '[]');
+      const queue = JSON.parse(localStorage.getItem(queueKey) || '[]');
+      const payments = JSON.parse(localStorage.getItem(paymentsKey) || '[]');
+      const customerProfiles = JSON.parse(localStorage.getItem(profilesKey) || '[]');
+
+      await supabase.auth.updateUser({
+        data: {
+          traculator_payload: {
+            jobs,
+            queue,
+            payments,
+            customer_profiles: customerProfiles,
+            synced_at: new Date().toISOString(),
+          },
+        },
+      });
+    } catch (err) {
+      console.warn('Supabase cross-device cloud sync notice:', err?.message || err);
+    }
+  };
+
+  if (immediate) {
+    if (syncTimer) clearTimeout(syncTimer);
+    return await performSync();
+  }
+
+  if (syncTimer) clearTimeout(syncTimer);
+  syncTimer = setTimeout(performSync, 400);
+}
+
+/**
+ * Hydrate user data from Supabase Cloud on login / app start
+ * Downloads all remote jobs, queue, payments, and customer profiles into device cache.
+ */
+export async function hydrateUserDataFromSupabase(userId) {
+  if (!isSupabaseConfigured() || !supabase || !isValidUuid(userId)) return;
+
+  try {
+    const { data: { user }, error } = await supabase.auth.getUser();
+    if (error || !user) return;
+
+    const payload = user.user_metadata?.traculator_payload;
+    if (!payload) return;
+
+    const jobsKey = getUserStorageKey(userId, 'jobs');
+    const queueKey = getUserStorageKey(userId, 'queue');
+    const paymentsKey = getUserStorageKey(userId, 'payments');
+    const profilesKey = getUserStorageKey(userId, 'customer_profiles');
+
+    if (Array.isArray(payload.jobs)) {
+      const localJobs = JSON.parse(localStorage.getItem(jobsKey) || '[]');
+      const mergedJobs = localJobs.length === 0 ? payload.jobs : mergeRecordsById(payload.jobs, localJobs);
+      localStorage.setItem(jobsKey, JSON.stringify(mergedJobs));
+    }
+
+    if (Array.isArray(payload.queue)) {
+      const localQueue = JSON.parse(localStorage.getItem(queueKey) || '[]');
+      const mergedQueue = localQueue.length === 0 ? payload.queue : mergeRecordsById(payload.queue, localQueue);
+      localStorage.setItem(queueKey, JSON.stringify(mergedQueue));
+    }
+
+    if (Array.isArray(payload.payments)) {
+      const localPayments = JSON.parse(localStorage.getItem(paymentsKey) || '[]');
+      const mergedPayments = localPayments.length === 0 ? payload.payments : mergeRecordsById(payload.payments, localPayments);
+      localStorage.setItem(paymentsKey, JSON.stringify(mergedPayments));
+    }
+
+    if (Array.isArray(payload.customer_profiles)) {
+      const localProfiles = JSON.parse(localStorage.getItem(profilesKey) || '[]');
+      const mergedProfiles = localProfiles.length === 0 ? payload.customer_profiles : mergeRecordsById(payload.customer_profiles, localProfiles);
+      localStorage.setItem(profilesKey, JSON.stringify(mergedProfiles));
+    }
+  } catch (err) {
+    console.warn('Hydrate from Supabase error:', err);
+  }
+}
+
+/**
  * Fetch all completed jobs for the current authenticated user (with APK & offline resilience)
  */
 export async function fetchUserJobs(userId) {
   if (!userId) return [];
   const effectiveUserId = userId;
   const key = getUserStorageKey(effectiveUserId, 'jobs');
-  const cachedLocal = JSON.parse(localStorage.getItem(key) || '[]');
 
   if (isSupabaseConfigured() && supabase && isValidUuid(effectiveUserId)) {
     try {
@@ -78,43 +183,39 @@ export async function fetchUserJobs(userId) {
         .eq('user_id', effectiveUserId)
         .order('created_at', { ascending: false });
 
-      if (error) {
-        console.warn('Supabase fetchUserJobs notice:', error.message);
-        return cachedLocal;
+      if (!error && data && data.length > 0) {
+        const mapped = data.map(r => ({
+          id: r.id,
+          userId: r.user_id,
+          customerName: r.customer_name,
+          mobileNumber: r.mobile_number,
+          address: r.address,
+          location: r.location,
+          workDescription: r.work_description,
+          ratePerMinute: Number(r.rate_per_minute) || 100,
+          timerMode: r.timer_mode || 'stopwatch',
+          durationMinutesPreset: r.duration_minutes_preset,
+          startTime: r.start_time,
+          endTime: r.end_time,
+          durationSeconds: Number(r.duration_seconds) || 0,
+          workAmount: Number(r.work_amount) || 0,
+          expenses: r.expenses || { diesel: 0, driver: 0, food: 0, other: 0 },
+          totalExpenses: Number(r.total_expenses) || 0,
+          netEarnings: Number(r.net_earnings) || 0,
+          date: r.date,
+          status: r.status || 'completed',
+          createdAt: r.created_at,
+        }));
+
+        localStorage.setItem(key, JSON.stringify(mapped));
+        return mapped;
       }
-
-      const mapped = (data || []).map(r => ({
-        id: r.id,
-        userId: r.user_id,
-        customerName: r.customer_name,
-        mobileNumber: r.mobile_number,
-        address: r.address,
-        location: r.location,
-        workDescription: r.work_description,
-        ratePerMinute: Number(r.rate_per_minute) || 100,
-        timerMode: r.timer_mode || 'stopwatch',
-        durationMinutesPreset: r.duration_minutes_preset,
-        startTime: r.start_time,
-        endTime: r.end_time,
-        durationSeconds: Number(r.duration_seconds) || 0,
-        workAmount: Number(r.work_amount) || 0,
-        expenses: r.expenses || { diesel: 0, driver: 0, food: 0, other: 0 },
-        totalExpenses: Number(r.total_expenses) || 0,
-        netEarnings: Number(r.net_earnings) || 0,
-        date: r.date,
-        status: r.status || 'completed',
-        createdAt: r.created_at,
-      }));
-
-      // Cache strictly for this authenticated user
-      localStorage.setItem(key, JSON.stringify(mapped));
-      return mapped;
     } catch (err) {
       console.warn('fetchUserJobs remote fetch issue:', err);
-      return cachedLocal;
     }
   }
 
+  const cachedLocal = JSON.parse(localStorage.getItem(key) || '[]');
   return cachedLocal;
 }
 
@@ -129,10 +230,10 @@ export async function saveUserJob(userId, record) {
   const existing = JSON.parse(localStorage.getItem(key) || '[]');
   const updatedLocal = [record, ...existing.filter(r => r.id !== record.id)];
   
-  // Save directly to user-specific local storage
+  // 1. Save directly to user-specific local storage
   localStorage.setItem(key, JSON.stringify(updatedLocal));
 
-  // Sync to Supabase if configured and valid UUID
+  // 2. Sync to Supabase cloud
   if (isSupabaseConfigured() && supabase && isValidUuid(effectiveUserId)) {
     try {
       await ensureProfileExists(effectiveUserId);
@@ -160,13 +261,13 @@ export async function saveUserJob(userId, record) {
         created_at: safeIsoDate(record.createdAt),
       };
 
-      const { error } = await supabase.from('jobs').upsert(payload);
-      if (error) {
-        console.warn('Supabase saveUserJob notice:', error.message);
-      }
+      await supabase.from('jobs').upsert(payload);
     } catch (err) {
       console.warn('Supabase remote save issue:', err);
     }
+
+    // Push full cloud sync payload
+    await syncAccountPayloadToSupabase(effectiveUserId, true);
   }
 
   return updatedLocal;
@@ -193,16 +294,16 @@ export async function deleteUserJob(userId, recordId) {
 
   if (isSupabaseConfigured() && supabase && isValidUuid(effectiveUserId)) {
     try {
-      const { error } = await supabase
+      await supabase
         .from('jobs')
         .delete()
         .eq('id', recordId)
         .eq('user_id', effectiveUserId);
-
-      if (error) console.warn('Supabase deleteUserJob notice:', error.message);
     } catch (err) {
       console.warn('deleteUserJob remote error:', err);
     }
+
+    await syncAccountPayloadToSupabase(effectiveUserId, true);
   }
 
   return updatedLocal;
@@ -215,7 +316,6 @@ export async function fetchUserQueue(userId) {
   if (!userId) return [];
   const effectiveUserId = userId;
   const key = getUserStorageKey(effectiveUserId, 'queue');
-  const cachedLocal = JSON.parse(localStorage.getItem(key) || '[]');
 
   if (isSupabaseConfigured() && supabase && isValidUuid(effectiveUserId)) {
     try {
@@ -225,35 +325,32 @@ export async function fetchUserQueue(userId) {
         .eq('user_id', effectiveUserId)
         .order('created_at', { ascending: false });
 
-      if (error) {
-        console.warn('Supabase fetchUserQueue notice:', error.message);
-        return cachedLocal;
+      if (!error && data && data.length > 0) {
+        const mapped = data.map(c => ({
+          id: c.id,
+          userId: c.user_id,
+          customerName: c.customer_name,
+          mobileNumber: c.mobile_number,
+          address: c.address,
+          location: c.location,
+          workDescription: c.work_description,
+          ratePerMinute: Number(c.rate_per_minute) || 100,
+          timerMode: c.timer_mode || 'stopwatch',
+          durationMinutesPreset: c.duration_minutes_preset,
+          status: c.status || 'pending',
+          expenses: c.expenses || { diesel: 0, driver: 0, food: 0, other: 0 },
+          createdAt: c.created_at,
+        }));
+
+        localStorage.setItem(key, JSON.stringify(mapped));
+        return mapped;
       }
-
-      const mapped = (data || []).map(c => ({
-        id: c.id,
-        userId: c.user_id,
-        customerName: c.customer_name,
-        mobileNumber: c.mobile_number,
-        address: c.address,
-        location: c.location,
-        workDescription: c.work_description,
-        ratePerMinute: Number(c.rate_per_minute) || 100,
-        timerMode: c.timer_mode || 'stopwatch',
-        durationMinutesPreset: c.duration_minutes_preset,
-        status: c.status || 'pending',
-        expenses: c.expenses || { diesel: 0, driver: 0, food: 0, other: 0 },
-        createdAt: c.created_at,
-      }));
-
-      localStorage.setItem(key, JSON.stringify(mapped));
-      return mapped;
     } catch (err) {
       console.warn('fetchUserQueue remote error:', err);
-      return cachedLocal;
     }
   }
 
+  const cachedLocal = JSON.parse(localStorage.getItem(key) || '[]');
   return cachedLocal;
 }
 
@@ -289,11 +386,12 @@ export async function saveQueuedCustomer(userId, customer) {
         created_at: safeIsoDate(customer.createdAt),
       };
 
-      const { error } = await supabase.from('customer_queue').upsert(payload);
-      if (error) console.warn('Supabase saveQueuedCustomer notice:', error.message);
+      await supabase.from('customer_queue').upsert(payload);
     } catch (err) {
       console.warn('saveQueuedCustomer remote error:', err);
     }
+
+    await syncAccountPayloadToSupabase(effectiveUserId, true);
   }
 
   return updatedLocal;
@@ -313,16 +411,16 @@ export async function removeQueuedCustomer(userId, customerId) {
 
   if (isSupabaseConfigured() && supabase && isValidUuid(effectiveUserId)) {
     try {
-      const { error } = await supabase
+      await supabase
         .from('customer_queue')
         .delete()
         .eq('id', customerId)
         .eq('user_id', effectiveUserId);
-
-      if (error) console.warn('Supabase removeQueuedCustomer notice:', error.message);
     } catch (err) {
       console.warn('removeQueuedCustomer remote error:', err);
     }
+
+    await syncAccountPayloadToSupabase(effectiveUserId, true);
   }
 
   return updatedLocal;
@@ -377,7 +475,6 @@ export async function fetchUserPayments(userId) {
   if (!userId) return [];
   const effectiveUserId = userId;
   const key = getUserStorageKey(effectiveUserId, 'payments');
-  const cachedLocal = JSON.parse(localStorage.getItem(key) || '[]');
 
   if (isSupabaseConfigured() && supabase && isValidUuid(effectiveUserId)) {
     try {
@@ -387,34 +484,31 @@ export async function fetchUserPayments(userId) {
         .eq('user_id', effectiveUserId)
         .order('created_at', { ascending: false });
 
-      if (error) {
-        console.warn('Supabase fetchUserPayments notice:', error.message);
-        return cachedLocal;
+      if (!error && data && data.length > 0) {
+        const mapped = data.map(p => ({
+          id: p.id,
+          userId: p.user_id,
+          customerId: p.customer_id,
+          customerName: p.customer_name,
+          mobileNumber: p.mobile_number || '',
+          amount: Number(p.amount) || 0,
+          date: p.date,
+          time: p.time,
+          timestamp: p.timestamp || p.created_at,
+          paymentMode: p.payment_mode || 'Cash',
+          notes: p.notes || '',
+          createdAt: p.created_at,
+        }));
+
+        localStorage.setItem(key, JSON.stringify(mapped));
+        return mapped;
       }
-
-      const mapped = (data || []).map(p => ({
-        id: p.id,
-        userId: p.user_id,
-        customerId: p.customer_id,
-        customerName: p.customer_name,
-        mobileNumber: p.mobile_number || '',
-        amount: Number(p.amount) || 0,
-        date: p.date,
-        time: p.time,
-        timestamp: p.timestamp || p.created_at,
-        paymentMode: p.payment_mode || 'Cash',
-        notes: p.notes || '',
-        createdAt: p.created_at,
-      }));
-
-      localStorage.setItem(key, JSON.stringify(mapped));
-      return mapped;
     } catch (err) {
       console.warn('Supabase fetchUserPayments error:', err);
-      return cachedLocal;
     }
   }
 
+  const cachedLocal = JSON.parse(localStorage.getItem(key) || '[]');
   return cachedLocal;
 }
 
@@ -450,11 +544,12 @@ export async function saveUserPayment(userId, payment) {
         created_at: safeIsoDate(payment.createdAt),
       };
 
-      const { error } = await supabase.from('payments').upsert(payload);
-      if (error) console.warn('Supabase saveUserPayment note:', error.message);
+      await supabase.from('payments').upsert(payload);
     } catch (err) {
       console.warn('saveUserPayment remote error:', err);
     }
+
+    await syncAccountPayloadToSupabase(effectiveUserId, true);
   }
 
   return updatedLocal;
@@ -481,16 +576,16 @@ export async function deleteUserPayment(userId, paymentId) {
 
   if (isSupabaseConfigured() && supabase && isValidUuid(effectiveUserId)) {
     try {
-      const { error } = await supabase
+      await supabase
         .from('payments')
         .delete()
         .eq('id', paymentId)
         .eq('user_id', effectiveUserId);
-
-      if (error) console.warn('Supabase deleteUserPayment note:', error.message);
     } catch (err) {
       console.warn('deleteUserPayment remote error:', err);
     }
+
+    await syncAccountPayloadToSupabase(effectiveUserId, true);
   }
 
   return updatedLocal;
@@ -503,7 +598,6 @@ export async function fetchCustomerProfiles(userId) {
   if (!userId) return [];
   const effectiveUserId = userId;
   const key = getUserStorageKey(effectiveUserId, 'customer_profiles');
-  const cachedLocal = JSON.parse(localStorage.getItem(key) || '[]');
 
   let remoteProfiles = [];
   if (isSupabaseConfigured() && supabase && isValidUuid(effectiveUserId)) {
@@ -514,7 +608,7 @@ export async function fetchCustomerProfiles(userId) {
         .eq('user_id', effectiveUserId)
         .order('customer_name', { ascending: true });
 
-      if (!error && data) {
+      if (!error && data && data.length > 0) {
         remoteProfiles = data.map(p => ({
           id: p.id,
           userId: p.user_id,
@@ -534,9 +628,10 @@ export async function fetchCustomerProfiles(userId) {
     }
   }
 
+  const cachedLocal = JSON.parse(localStorage.getItem(key) || '[]');
   const profileMap = new Map();
 
-  // 1. Add remote profiles first (source of truth)
+  // 1. Add remote profiles first
   remoteProfiles.forEach(p => {
     const normKey = (p.customerName || p.id || '').toLowerCase().trim();
     if (normKey) profileMap.set(normKey, p);
@@ -638,11 +733,12 @@ export async function saveCustomerProfile(userId, profile) {
         duration_minutes_preset: profile.durationMinutesPreset || null,
         created_at: safeIsoDate(profile.createdAt),
       };
-      const { error } = await supabase.from('customer_profiles').upsert(payload);
-      if (error) console.warn('Supabase saveCustomerProfile note:', error.message);
+      await supabase.from('customer_profiles').upsert(payload);
     } catch (err) {
       console.warn('saveCustomerProfile remote error:', err);
     }
+
+    await syncAccountPayloadToSupabase(effectiveUserId, true);
   }
 
   return updatedLocal;
@@ -784,21 +880,6 @@ export async function fetchAllCustomersForAdmin() {
     });
   });
 
-  // Add universal local jobs
-  const universalJobs = JSON.parse(localStorage.getItem('traculator_universal_jobs_v1') || '[]');
-  universalJobs.forEach(j => {
-    if (!allJobsMap.has(j.id)) {
-      allJobsMap.set(j.id, {
-        id: j.id,
-        userId: j.userId || 'trac_local_operator',
-        workAmount: Number(j.workAmount) || 0,
-        totalExpenses: Number(j.totalExpenses) || 0,
-        netEarnings: Number(j.netEarnings) || 0,
-        durationSeconds: Number(j.durationSeconds) || 0,
-      });
-    }
-  });
-
   // Add user-specific local jobs across localStorage keys
   for (let i = 0; i < localStorage.length; i++) {
     const key = localStorage.key(i);
@@ -910,37 +991,7 @@ export async function fetchAllJobsForAdmin() {
     }
   }
 
-  // 2. Add universal local jobs
-  const universalJobs = JSON.parse(localStorage.getItem('traculator_universal_jobs_v1') || '[]');
-  universalJobs.forEach(j => {
-    if (!jobsMap.has(j.id)) {
-      jobsMap.set(j.id, {
-        id: j.id,
-        userId: j.userId || 'trac_local_operator',
-        operatorName: j.operatorName || 'Operator',
-        customerName: j.customerName || 'Field Customer',
-        mobileNumber: j.mobileNumber || '',
-        address: j.address || '',
-        location: j.location || '',
-        workDescription: j.workDescription || '',
-        ratePerMinute: Number(j.ratePerMinute) || 100,
-        timerMode: j.timerMode || 'stopwatch',
-        durationMinutesPreset: j.durationMinutesPreset,
-        startTime: j.startTime,
-        endTime: j.endTime,
-        durationSeconds: Number(j.durationSeconds) || 0,
-        workAmount: Number(j.workAmount) || 0,
-        expenses: j.expenses || { diesel: 0, driver: 0, food: 0, other: 0 },
-        totalExpenses: Number(j.totalExpenses) || 0,
-        netEarnings: Number(j.netEarnings) || 0,
-        date: j.date || new Date().toISOString().split('T')[0],
-        status: j.status || 'completed',
-        createdAt: j.createdAt || new Date().toISOString(),
-      });
-    }
-  });
-
-  // 3. Add jobs from all local user storage keys
+  // 2. Add jobs from all local user storage keys
   for (let i = 0; i < localStorage.length; i++) {
     const key = localStorage.key(i);
     if (key && key.startsWith('traculator_jobs_')) {
@@ -980,7 +1031,7 @@ export async function fetchAllJobsForAdmin() {
     }
   }
 
-  // 4. Enhance with actual user names if known
+  // 3. Enhance with actual user names if known
   const customers = await fetchAllCustomersForAdmin();
   const custMap = new Map(customers.map(c => [c.id, c]));
 

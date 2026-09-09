@@ -32,6 +32,7 @@ import {
   deleteUserPayment,
   fetchCustomerProfiles,
   saveCustomerProfile,
+  hydrateUserDataFromSupabase,
 } from './utils/supabaseStorage';
 import {
   initializeStorage,
@@ -112,31 +113,20 @@ export default function App() {
       setIsAuthLoading(true);
       initializeStorage();
       try {
-        let user = await getCurrentUser();
+        const user = await getCurrentUser();
         const admin = await getCurrentAdmin();
-        if (!user) {
-          const cached = localStorage.getItem('traculator_current_user_v1');
-          if (cached) {
-            try {
-              user = JSON.parse(cached);
-            } catch (e) {
-              user = null;
-            }
-          }
-          if (!user) {
-            user = DEFAULT_LOCAL_OPERATOR;
-            localStorage.setItem('traculator_current_user_v1', JSON.stringify(DEFAULT_LOCAL_OPERATOR));
-          }
+        if (user) {
+          setCurrentUser(user);
+          await loadCustomerData(user.id);
+        } else {
+          setCurrentUser(null);
         }
-        setCurrentUser(user);
-        await loadCustomerData(user.id);
         if (admin) {
           setAdminUser(admin);
         }
       } catch (err) {
         console.error('Auth initialization error:', err);
-        setCurrentUser(DEFAULT_LOCAL_OPERATOR);
-        await loadCustomerData(DEFAULT_LOCAL_OPERATOR.id);
+        setCurrentUser(null);
       } finally {
         setIsAuthLoading(false);
       }
@@ -148,6 +138,7 @@ export default function App() {
   const loadCustomerData = async (userId) => {
     if (!userId) return;
     try {
+      await hydrateUserDataFromSupabase(userId);
       const [records, queue, pays, profs] = await Promise.all([
         fetchUserJobs(userId),
         fetchUserQueue(userId),
