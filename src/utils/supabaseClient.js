@@ -200,15 +200,30 @@ export async function signInCustomer({ identifier, password }) {
 }
 
 /**
+ * Resolves the authentication redirect URL dynamically based on the current origin.
+ * Automatically adapts between local development (http://localhost:3000) and production (https://traculator.vercel.app).
+ */
+export function getAuthRedirectUrl() {
+  if (typeof window !== 'undefined' && window.location && window.location.origin) {
+    const origin = window.location.origin;
+    if (origin.startsWith('http://') || origin.startsWith('https://')) {
+      return origin;
+    }
+  }
+  return 'https://traculator.vercel.app';
+}
+
+/**
  * Google OAuth Sign In / Sign Up
- * Opens Supabase Google OAuth Provider.
+ * Opens Supabase Google OAuth Provider with dynamic redirect URL based on current app origin.
  */
 export async function signInWithGoogle() {
   if (isSupabaseConfigured() && supabase) {
+    const redirectUrl = getAuthRedirectUrl();
     const { data, error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {
-        redirectTo: window.location.origin,
+        redirectTo: redirectUrl,
       },
     });
 
@@ -229,8 +244,9 @@ export async function resetPassword({ identifier }) {
   }
 
   if (isSupabaseConfigured() && supabase) {
+    const redirectUrl = getAuthRedirectUrl();
     const { data, error } = await supabase.auth.resetPasswordForEmail(loginEmail, {
-      redirectTo: window.location.origin,
+      redirectTo: redirectUrl,
     });
 
     if (error) throw error;
