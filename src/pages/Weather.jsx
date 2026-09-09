@@ -1,13 +1,23 @@
-import React, { useState, useEffect } from 'react';
-import { Cloud, Sun, CloudRain, Wind, Droplets, Compass, MapPin, RefreshCw, AlertTriangle, CheckCircle2, ChevronRight, Sparkles } from 'lucide-react';
-import { fetchLiveWeather, POPULAR_AGRI_DISTRICTS } from '../utils/weatherApi';
+import React, { useState, useEffect, useRef } from 'react';
+import { Cloud, Sun, CloudRain, Wind, Droplets, Compass, MapPin, RefreshCw, AlertTriangle, CheckCircle2, ChevronRight, Sparkles, Search, X } from 'lucide-react';
+import { fetchLiveWeather } from '../utils/weatherApi';
+import { detectDeviceGpsLocation, getCachedLocation, reverseGeocodeLocation, searchCities, POPULAR_AGRI_DISTRICTS } from '../utils/locationService';
 import { playClickFeedback } from '../utils/timer';
 
 export default function Weather() {
-  const [selectedDistrict, setSelectedDistrict] = useState(POPULAR_AGRI_DISTRICTS[0]);
+  const [selectedLocation, setSelectedLocation] = useState(() => {
+    return getCachedLocation() || POPULAR_AGRI_DISTRICTS[0];
+  });
   const [weatherData, setWeatherData] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [gpsActive, setGpsActive] = useState(false);
+  const [isDetectingGps, setIsDetectingGps] = useState(false);
+
+  // Search state
+  const [isSearching, setIsSearching] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const searchTimeoutRef = useRef(null);
 
   const loadWeather = async (lat, lon) => {
     setLoading(true);
@@ -21,49 +31,122 @@ export default function Weather() {
     }
   };
 
+  // Automatic GPS Location Detection on Component Mount
   useEffect(() => {
-    loadWeather(selectedDistrict.lat, selectedDistrict.lon);
-  }, [selectedDistrict]);
+    let isMounted = true;
 
-  const handleDistrictChange = (e) => {
-    playClickFeedback();
-    const found = POPULAR_AGRI_DISTRICTS.find(d => d.name === e.target.value);
-    if (found) {
-      setSelectedDistrict(found);
-      setGpsActive(false);
-    }
-  };
+    const autoDetectGpsWeather = async () => {
+      // 1. If we have a cached location, load it immediately to prevent delay
+      const cached = getCachedLocation();
+      if (cached) {
+        setSelectedLocation(cached);
+        loadWeather(cached.lat, cached.lon);
+      }
 
-  const handleUseGPS = () => {
+      // 2. Query device GPS in background to fetch fresh accurate current location
+      if (navigator.geolocation) {
+        try {
+          const detected = await detectDeviceGpsLocation({ timeout: 8000, maximumAge: 60000 });
+          if (isMounted && detected) {
+            setSelectedLocation(detected);
+            loadWeather(detected.lat, detected.lon);
+          }
+        } catch (e) {
+          console.warn('Auto GPS notice:', e);
+          if (isMounted && !cached) {
+            loadWeather(POPULAR_AGRI_DISTRICTS[0].lat, POPULAR_AGRI_DISTRICTS[0].lon);
+          }
+        }
+      } else if (!cached) {
+        if (isMounted) {
+          loadWeather(POPULAR_AGRI_DISTRICTS[0].lat, POPULAR_AGRI_DISTRICTS[0].lon);
+        }
+      }
+    };
+
+    autoDetectGpsWeather();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  // Manual GPS Refresh Trigger
+  const handleUseGPS = async () => {
     playClickFeedback();
     if (!navigator.geolocation) {
-      alert('Geolocation is not supported by your browser.');
+      alert('Geolocation is not supported on this device.');
       return;
     }
 
+    setIsDetectingGps(true);
     setLoading(true);
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        const { latitude, longitude } = pos.coords;
-        setSelectedDistrict({
-          name: 'Current Field GPS Location',
-          lat: latitude,
-          lon: longitude,
-        });
-        setGpsActive(true);
-        loadWeather(latitude, longitude);
-      },
-      (err) => {
-        console.error('GPS error:', err);
-        setLoading(false);
-        alert('Could not retrieve GPS location. Using default district.');
-      }
-    );
+
+    try {
+      const detected = await detectDeviceGpsLocation({ timeout: 12000, maximumAge: 0 });
+      setSelectedLocation(detected);
+      await loadWeather(detected.lat, detected.lon);
+    } catch (err) {
+      console.error('Manual GPS refresh error:', err);
+      alert('Could not retrieve current GPS position. Please ensure location permissions are enabled.');
+    } finally {
+      setIsDetectingGps(false);
+      setLoading(false);
+    }
   };
 
   const handleRefresh = () => {
     playClickFeedback();
-    loadWeather(selectedDistrict.lat, selectedDistrict.lon);
+    loadWeather(selectedLocation.lat, selectedLocation.lon);
+  };
+
+  // Handle Search Input Change
+  const handleSearchChange = (e) => {
+    const q = e.target.value;
+    setSearchQuery(q);
+
+    if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
+
+    if (!q || q.trim().length < 2) {
+      setSearchResults([]);
+      setSearchLoading(false);
+      return;
+    }
+
+    setSearchLoading(true);
+    searchTimeoutRef.current = setTimeout(async () => {
+      const results = await searchCities(q);
+      setSearchResults(results);
+      setSearchLoading(false);
+    }, 350);
+  };
+
+  const handleSelectSearchResult = (loc) => {
+    playClickFeedback();
+    const locationObj = {
+      name: loc.displayName || loc.name,
+      lat: loc.lat,
+      lon: loc.lon,
+      isGps: false,
+    };
+    setSelectedLocation(locationObj);
+    setIsSearching(false);
+    setSearchQuery('');
+    setSearchResults([]);
+    loadWeather(locationObj.lat, locationObj.lon);
+  };
+
+  const handleDistrictDropdownChange = (e) => {
+    playClickFeedback();
+    const val = e.target.value;
+    if (val === 'search_other') {
+      setIsSearching(true);
+      return;
+    }
+    const found = POPULAR_AGRI_DISTRICTS.find(d => d.name === val);
+    if (found) {
+      setSelectedLocation(found);
+      loadWeather(found.lat, found.lon);
+    }
   };
 
   return (
@@ -81,43 +164,131 @@ export default function Weather() {
           </div>
           <button
             onClick={handleRefresh}
-            disabled={loading}
-            className="p-2 rounded-xl bg-[#F7F7F5] hover:bg-gray-200 text-gray-700 text-xs font-bold flex items-center gap-1 border border-gray-300"
+            disabled={loading || isDetectingGps}
+            className="p-2 rounded-xl bg-[#F7F7F5] hover:bg-gray-200 text-gray-700 text-xs font-bold flex items-center gap-1 border border-gray-300 transition-all active:scale-95"
             title="Refresh weather data"
           >
-            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+            <RefreshCw className={`w-3.5 h-3.5 ${loading || isDetectingGps ? 'animate-spin text-[#1F5E3B]' : ''}`} />
             <span className="hidden sm:inline">Refresh</span>
           </button>
         </div>
       </div>
 
-      {/* District / Location Selector Bar */}
-      <div className="card-base bg-white p-3 border border-gray-200 flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2 min-w-0 flex-1">
-          <MapPin className="w-4 h-4 text-[#1F5E3B] shrink-0" />
-          <select
-            value={gpsActive ? 'Current Field GPS Location' : selectedDistrict.name}
-            onChange={handleDistrictChange}
-            className="w-full bg-[#F7F7F5] border border-gray-300 font-bold text-xs sm:text-sm text-gray-900 rounded-xl px-2.5 py-1.5 outline-none focus:border-[#1F5E3B] cursor-pointer"
-          >
-            {gpsActive && (
-              <option value="Current Field GPS Location">📍 Current Field GPS Location</option>
-            )}
-            {POPULAR_AGRI_DISTRICTS.map((d) => (
-              <option key={d.name} value={d.name}>
-                {d.name}
+      {/* Location / GPS Selector & Search Bar */}
+      <div className="card-base bg-white p-3 border border-gray-200 space-y-2">
+        <div className="flex items-center justify-between gap-2">
+          {/* Main Location Dropdown / Title */}
+          <div className="flex items-center gap-2 min-w-0 flex-1">
+            <MapPin className="w-4 h-4 text-[#1F5E3B] shrink-0" />
+            <select
+              value={selectedLocation.name}
+              onChange={handleDistrictDropdownChange}
+              className="w-full bg-[#F7F7F5] border border-gray-300 font-bold text-xs sm:text-sm text-gray-900 rounded-xl px-2.5 py-1.5 outline-none focus:border-[#1F5E3B] cursor-pointer truncate"
+            >
+              {/* Selected / GPS Location */}
+              <option value={selectedLocation.name}>
+                📍 {selectedLocation.name} {selectedLocation.isGps ? '(Current GPS)' : ''}
               </option>
-            ))}
-          </select>
+
+              <optgroup label="Popular Agricultural Districts">
+                {POPULAR_AGRI_DISTRICTS.filter(d => d.name !== selectedLocation.name).map((d) => (
+                  <option key={d.name} value={d.name}>
+                    {d.name}
+                  </option>
+                ))}
+              </optgroup>
+
+              <option value="search_other">🔍 Search another city / village...</option>
+            </select>
+          </div>
+
+          {/* Search Button Toggle */}
+          <button
+            type="button"
+            onClick={() => {
+              playClickFeedback();
+              setIsSearching(!isSearching);
+            }}
+            className={`p-2 rounded-xl border text-xs font-bold transition-all ${
+              isSearching
+                ? 'bg-[#1F5E3B] text-white border-[#1F5E3B]'
+                : 'bg-[#F7F7F5] text-gray-700 border-gray-300 hover:bg-gray-200'
+            }`}
+            title="Search city or location"
+          >
+            <Search className="w-3.5 h-3.5" />
+          </button>
+
+          {/* Manual GPS Re-detect Button */}
+          <button
+            type="button"
+            onClick={handleUseGPS}
+            disabled={isDetectingGps}
+            className="text-xs font-bold bg-emerald-50 hover:bg-emerald-100 text-[#1F5E3B] border border-emerald-200 px-3 py-1.5 rounded-xl shrink-0 flex items-center gap-1 transition-all active:scale-95"
+            title="Detect current device GPS location"
+          >
+            <MapPin className={`w-3.5 h-3.5 ${isDetectingGps ? 'animate-bounce' : ''}`} />
+            <span>{isDetectingGps ? 'Locating...' : 'Use GPS'}</span>
+          </button>
         </div>
 
-        <button
-          type="button"
-          onClick={handleUseGPS}
-          className="text-xs font-bold bg-emerald-50 hover:bg-emerald-100 text-[#1F5E3B] border border-emerald-200 px-3 py-1.5 rounded-xl shrink-0 flex items-center gap-1"
-        >
-          <span>Use GPS</span>
-        </button>
+        {/* Expandable Manual Search Bar */}
+        {isSearching && (
+          <div className="pt-2 border-t border-gray-100 space-y-2 animate-fadeIn">
+            <div className="relative">
+              <input
+                type="text"
+                placeholder="Type city or district (e.g. Kolkata, Patna, Ludhiana, Pune)..."
+                value={searchQuery}
+                onChange={handleSearchChange}
+                autoFocus
+                className="w-full bg-[#F7F7F5] border border-[#1F5E3B] font-bold text-xs sm:text-sm text-gray-900 rounded-xl pl-8 pr-8 py-2 outline-none"
+              />
+              <Search className="w-3.5 h-3.5 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSearchQuery('');
+                    setSearchResults([]);
+                  }}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+
+            {/* Search Dropdown Results */}
+            {searchLoading && (
+              <div className="text-xs font-bold text-gray-500 py-1 text-center">
+                Searching locations...
+              </div>
+            )}
+
+            {!searchLoading && searchResults.length > 0 && (
+              <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm divide-y divide-gray-100 max-h-48 overflow-y-auto">
+                {searchResults.map((res, i) => (
+                  <button
+                    key={i}
+                    type="button"
+                    onClick={() => handleSelectSearchResult(res)}
+                    className="w-full text-left px-3 py-2 text-xs font-bold text-gray-800 hover:bg-emerald-50 hover:text-[#1F5E3B] flex items-center justify-between transition-colors"
+                  >
+                    <span>{res.displayName}</span>
+                    <span className="text-[10px] text-gray-400 font-normal">Select</span>
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {!searchLoading && searchQuery.trim().length >= 2 && searchResults.length === 0 && (
+              <div className="text-xs text-gray-500 py-1 text-center font-medium">
+                No matching location found. Please try another city name.
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Main Temperature & Condition Card */}
@@ -126,8 +297,9 @@ export default function Weather() {
           <div className="card-base bg-gradient-to-br from-[#1F5E3B] to-[#16452B] text-white p-5 space-y-4 shadow-md">
             <div className="flex items-center justify-between">
               <div>
-                <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-200">
-                  {selectedDistrict.name}
+                <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-200 flex items-center gap-1">
+                  <MapPin className="w-3 h-3 text-emerald-300" />
+                  {selectedLocation.name}
                 </span>
                 <h3 className="text-2xl font-black text-white mt-0.5">
                   {weatherData.condition}

@@ -38,7 +38,7 @@ export function normalizeAuthIdentifier(identifier) {
 
 /**
  * Customer Sign Up (Using Supabase Auth + profiles table)
- * Columns: id (uuid), name (text), phone (text), email (text), address (text)
+ * Only uses: Full Name, Email, Phone Number, Password
  */
 export async function signUpCustomer({
   name = '',
@@ -46,21 +46,18 @@ export async function signUpCustomer({
   email = '',
   phone = '',
   mobileNumber = '',
-  address = '',
-  location = '',
-  defaultRate = 100,
   password = '',
   identifier = '',
+  address = '',
+  defaultRate = 100,
 }) {
   const cleanName = (name || fullName || 'Operator').trim();
   const cleanEmail = (email || (identifier.includes('@') ? identifier : '')).trim();
   const cleanPhone = (phone || mobileNumber || (!identifier.includes('@') ? identifier : '')).trim();
-  const cleanAddress = (address || location || '').trim();
   const effectiveIdentifier = (cleanEmail || cleanPhone || identifier || '').trim();
   const loginEmail = normalizeAuthIdentifier(effectiveIdentifier);
 
   let createdUserId = `usr_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
-  let authUser = null;
 
   if (isSupabaseConfigured() && supabase) {
     const { data: authData, error: authError } = await supabase.auth.signUp({
@@ -73,8 +70,7 @@ export async function signUpCustomer({
           phone: cleanPhone,
           mobile_number: cleanPhone,
           email: cleanEmail,
-          address: cleanAddress,
-          location: cleanAddress,
+          address: address.trim(),
         },
       },
     });
@@ -82,7 +78,6 @@ export async function signUpCustomer({
     if (authError) throw authError;
 
     if (authData?.user) {
-      authUser = authData.user;
       createdUserId = authData.user.id;
 
       // Upsert to profiles table
@@ -91,7 +86,7 @@ export async function signUpCustomer({
         name: cleanName,
         phone: cleanPhone,
         email: cleanEmail,
-        address: cleanAddress,
+        address: address.trim(),
         updated_at: new Date().toISOString(),
       });
 
@@ -99,7 +94,7 @@ export async function signUpCustomer({
     }
   }
 
-  // Unified User Profile Object (Without public usernames or displaying internal id)
+  // Unified User Profile Object
   const userObj = {
     id: createdUserId,
     name: cleanName,
@@ -107,14 +102,14 @@ export async function signUpCustomer({
     phone: cleanPhone,
     mobileNumber: cleanPhone,
     email: cleanEmail || loginEmail,
-    address: cleanAddress,
-    location: cleanAddress,
+    address: address.trim(),
+    location: address.trim(),
     defaultRate: Number(defaultRate) || 100,
     role: 'customer',
     createdAt: new Date().toISOString(),
   };
 
-  // Mirror to local device storage for offline resilience
+  // Mirror to local device storage
   const mockUsers = JSON.parse(localStorage.getItem('traculator_mock_users_v1') || '[]');
   const existingIdx = mockUsers.findIndex(u => u.id === userObj.id || (u.email && u.email.toLowerCase() === loginEmail.toLowerCase()));
   if (existingIdx >= 0) {
@@ -130,6 +125,7 @@ export async function signUpCustomer({
 
 /**
  * Customer Sign In (Using Email OR Mobile Phone + Password)
+ * Works strictly for existing registered accounts.
  */
 export async function signInCustomer({ identifier, password }) {
   const loginEmail = normalizeAuthIdentifier(identifier);
@@ -140,7 +136,13 @@ export async function signInCustomer({ identifier, password }) {
       password,
     });
 
-    if (error) throw error;
+    if (error) {
+      const msg = error.message?.toLowerCase() || '';
+      if (msg.includes('invalid login credentials') || msg.includes('invalid credentials') || msg.includes('user not found')) {
+        throw new Error('This account is not registered, or the password is incorrect. Please check your credentials or click Create Account.');
+      }
+      throw error;
+    }
 
     // Fetch profile row from public.profiles
     const { data: profile } = await supabase
@@ -189,11 +191,52 @@ export async function signInCustomer({ identifier, password }) {
     );
 
     if (!user) {
-      throw new Error('Invalid Email/Phone Number or Password.');
+      throw new Error('This account is not registered, or the password is incorrect. Please check your credentials or click Create Account.');
     }
 
     localStorage.setItem('traculator_current_user_v1', JSON.stringify(user));
     return { user, profile: user };
+  }
+}
+
+/**
+ * Google OAuth Sign In / Sign Up
+ * Opens Supabase Google OAuth Provider.
+ */
+export async function signInWithGoogle() {
+  if (isSupabaseConfigured() && supabase) {
+    const { data, error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo: window.location.origin,
+      },
+    });
+
+    if (error) throw error;
+    return data;
+  } else {
+    throw new Error('Google Sign-In requires active internet connection and Supabase configuration.');
+  }
+}
+
+/**
+ * Password Reset via Supabase Auth
+ */
+export async function resetPassword({ identifier }) {
+  const loginEmail = normalizeAuthIdentifier(identifier);
+  if (!loginEmail || !loginEmail.includes('@')) {
+    throw new Error('Please enter a valid Email Address or registered Phone Number.');
+  }
+
+  if (isSupabaseConfigured() && supabase) {
+    const { data, error } = await supabase.auth.resetPasswordForEmail(loginEmail, {
+      redirectTo: window.location.origin,
+    });
+
+    if (error) throw error;
+    return data;
+  } else {
+    throw new Error('Password reset requires active Supabase configuration.');
   }
 }
 

@@ -130,7 +130,7 @@ export default function CustomerDetailsModal({
                         className="btn-secondary text-[11px] py-1 px-2.5 flex items-center gap-1 text-[#1F5E3B]"
                         title="View full customer profile and payments"
                       >
-                        <Receipt className="w-3.5 h-3.5" /> Ledger / Profile
+                        <IndianRupee className="w-3.5 h-3.5" /> Ledger / Profile
                       </button>
                     )}
                     <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-md bg-emerald-100 text-[#1F5E3B]">

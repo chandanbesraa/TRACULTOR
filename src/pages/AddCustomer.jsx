@@ -1,7 +1,8 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { User, Phone, MapPin, Wrench, IndianRupee, Clock, Timer as TimerIcon, Play, Save, CheckCircle2, RotateCcw, Edit3, Receipt, Users } from 'lucide-react';
 import { playClickFeedback } from '../utils/timer';
 import { formatCurrency, calculateCustomerBalance } from '../utils/calculations';
+import { detectDeviceGpsLocation, getCachedLocation } from '../utils/locationService';
 
 export default function AddCustomer({
   savedProfiles = [],
@@ -20,6 +21,33 @@ export default function AddCustomer({
   const [ratePerMinute, setRatePerMinute] = useState(''); // Default empty with placeholder "Rate"
   const [timerMode, setTimerMode] = useState('stopwatch'); // 'stopwatch' | 'countdown' | 'manual'
   const [durationMinutes, setDurationMinutes] = useState(20);
+  const [isDetectingGps, setIsDetectingGps] = useState(false);
+
+  // Auto-fill field location if empty and cached location exists
+  useEffect(() => {
+    if (!location && !address) {
+      const cached = getCachedLocation();
+      if (cached?.name) {
+        setLocation(cached.name);
+      }
+    }
+  }, []);
+
+  const handleUseGpsLocation = async () => {
+    playClickFeedback();
+    setIsDetectingGps(true);
+    try {
+      const loc = await detectDeviceGpsLocation({ timeout: 10000, maximumAge: 0 });
+      if (loc?.name) {
+        setLocation(loc.name);
+        if (!address) setAddress(loc.name);
+      }
+    } catch (err) {
+      console.warn('GPS location detection error:', err);
+    } finally {
+      setIsDetectingGps(false);
+    }
+  };
 
   const [errors, setErrors] = useState({});
 
@@ -208,15 +236,15 @@ export default function AddCustomer({
                   <div className="font-bold text-gray-900 text-xs">{matchedCustomerProfile.customerName}</div>
                 </div>
               </div>
-              {onOpenCustomerProfile && (
-                <button
-                  type="button"
-                  onClick={() => onOpenCustomerProfile(matchedCustomerProfile)}
-                  className="btn-secondary text-[11px] py-1 px-2.5 flex items-center gap-1"
-                >
-                  <Receipt className="w-3 h-3 text-[#1F5E3B]" /> Ledger / Profile
-                </button>
-              )}
+                {onOpenCustomerProfile && (
+                  <button
+                    type="button"
+                    onClick={() => onOpenCustomerProfile(matchedCustomerProfile)}
+                    className="text-[11px] font-bold text-[#1F5E3B] bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-2.5 py-1 rounded-lg flex items-center gap-1"
+                  >
+                    <IndianRupee className="w-3.5 h-3.5 text-[#1F5E3B]" /> Ledger / Profile
+                  </button>
+                )}
             </div>
 
             <div className="grid grid-cols-3 gap-2 text-center text-xs pt-1 border-t border-gray-100">
@@ -296,12 +324,24 @@ export default function AddCustomer({
 
         {/* Field / Work Location */}
         <div className="space-y-1">
-          <label className="text-xs font-bold text-gray-800 flex items-center gap-1.5">
-            <MapPin className="w-4 h-4 text-[#1F5E3B]" /> Field / Work Location
-          </label>
+          <div className="flex items-center justify-between">
+            <label className="text-xs font-bold text-gray-800 flex items-center gap-1.5">
+              <MapPin className="w-4 h-4 text-[#1F5E3B]" /> Field / Work Location
+            </label>
+            <button
+              type="button"
+              onClick={handleUseGpsLocation}
+              disabled={isDetectingGps}
+              className="text-[11px] font-bold text-[#1F5E3B] bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-2.5 py-1 rounded-lg flex items-center gap-1 transition-all active:scale-95"
+              title="Detect current GPS location"
+            >
+              <MapPin className={`w-3 h-3 ${isDetectingGps ? 'animate-bounce' : ''}`} />
+              <span>{isDetectingGps ? 'Detecting...' : 'Use GPS'}</span>
+            </button>
+          </div>
           <input
             type="text"
-            placeholder="Asansol"
+            placeholder="e.g. Kolkata, West Bengal or Field Locality"
             value={location}
             onChange={(e) => setLocation(e.target.value)}
             className="w-full bg-[#F7F7F5] border border-gray-300 rounded-xl px-3.5 py-3 text-sm font-semibold text-gray-900 focus:bg-white focus:border-[#1F5E3B] outline-none"

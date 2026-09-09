@@ -60,7 +60,7 @@ export default function CustomerCard({
               className="p-1.5 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-[#1F5E3B] text-xs font-bold flex items-center gap-1 border border-emerald-200 shadow-xs"
               title="View Customer Profile & Payments"
             >
-              <Receipt className="w-3.5 h-3.5" />
+              <IndianRupee className="w-3.5 h-3.5" />
               <span className="text-[11px]">Ledger</span>
             </button>
           )}
@@ -193,7 +193,7 @@ export default function CustomerCard({
           onClick={() => onOpenCustomerProfile && onOpenCustomerProfile(customer)}
           className="inline-flex items-center gap-1 text-[11px] font-bold text-[#1F5E3B] hover:underline"
         >
-          <Receipt className="w-3.5 h-3.5" />
+          <IndianRupee className="w-3.5 h-3.5" />
           <span>View Ledger & Payments &rarr;</span>
         </button>
       </div>

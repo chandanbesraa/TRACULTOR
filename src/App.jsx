@@ -17,6 +17,8 @@ import {
   getCurrentUser,
   getCurrentAdmin,
   signOutUser,
+  supabase,
+  isSupabaseConfigured,
 } from './utils/supabaseClient';
 import {
   fetchUserJobs,
@@ -41,6 +43,7 @@ import {
 } from './utils/storage';
 import { calculateWorkAmount } from './utils/calculations';
 import { playCompletionChime } from './utils/timer';
+import { detectDeviceGpsLocation } from './utils/locationService';
 
 export default function App() {
   // Navigation & Portal State (Admin portal is separate and accessed via #admin or /admin)
@@ -124,6 +127,11 @@ export default function App() {
         if (admin) {
           setAdminUser(admin);
         }
+
+        // Background GPS Location Pre-detection & Caching
+        if (typeof window !== 'undefined' && navigator.geolocation) {
+          detectDeviceGpsLocation({ timeout: 8000, maximumAge: 300000 }).catch(() => {});
+        }
       } catch (err) {
         console.error('Auth initialization error:', err);
         setCurrentUser(null);
@@ -132,6 +140,33 @@ export default function App() {
       }
     };
     initAuth();
+  }, []);
+
+  // Supabase Auth State Change Listener (Handles Google OAuth Redirects & Session Updates)
+  useEffect(() => {
+    if (!isSupabaseConfigured() || !supabase) return;
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if ((event === 'SIGNED_IN' || event === 'USER_UPDATED') && session?.user) {
+        const user = await getCurrentUser();
+        if (user) {
+          setCurrentUser(user);
+          await loadCustomerData(user.id);
+        }
+      } else if (event === 'SIGNED_OUT') {
+        setCurrentUser(null);
+        setCustomersQueue([]);
+        setCompletedRecords([]);
+        setPayments([]);
+        setSavedProfiles([]);
+        setSelectedCustomerForProfile(null);
+        setActiveCustId('');
+      }
+    });
+
+    return () => {
+      subscription?.unsubscribe();
+    };
   }, []);
 
   // Load customer records, queue, payments & profiles from Supabase / Storage
