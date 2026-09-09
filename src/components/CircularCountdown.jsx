@@ -1,5 +1,7 @@
 import React from 'react';
 import { formatDigitalTime } from '../utils/timer';
+import { formatDuration, formatTime } from '../utils/calculations';
+import { Clock, CheckCircle2 } from 'lucide-react';
 
 export default function CircularCountdown({
   remainingSeconds = 0,
@@ -8,33 +10,42 @@ export default function CircularCountdown({
   isRunning = false,
   ratePerMinute = 0,
   accruedAmount = 0,
+  startTime = null,
+  endTime = null,
 }) {
   const size = 260; // diameter in px
   const strokeWidth = 14;
   const radius = (size - strokeWidth) / 2;
   const circumference = 2 * Math.PI * radius;
 
-  // Percentage remaining: 1 when full, 0 when empty
-  const progressRatio = totalTargetSeconds > 0 
-    ? Math.max(0, Math.min(1, remainingSeconds / totalTargetSeconds))
-    : 0;
+  // Calculate Working Hours using Start Time and End Time / Elapsed Duration
+  const workingHoursDecimal = (elapsedSeconds / 3600).toFixed(2);
+  const workingMinutes = Math.round((elapsedSeconds / 60) * 10) / 10;
+  const targetMinutes = Math.round((totalTargetSeconds / 60) * 10) / 10;
 
-  // Stroke dashoffset: empties as remainingSeconds decreases
+  // Working Hours Progress (Fills up as work hours accrue towards target)
+  const progressRatio = totalTargetSeconds > 0
+    ? Math.max(0, Math.min(1, elapsedSeconds / totalTargetSeconds))
+    : 0;
   const strokeDashoffset = circumference * (1 - progressRatio);
 
-  const isCompleted = remainingSeconds <= 0 && totalTargetSeconds > 0;
-  const timeDisplay = formatDigitalTime(remainingSeconds, totalTargetSeconds >= 3600);
+  const isCompleted = totalTargetSeconds > 0 && elapsedSeconds >= totalTargetSeconds;
+  const timeDisplay = formatDigitalTime(elapsedSeconds, elapsedSeconds >= 3600 || totalTargetSeconds >= 3600);
+
+  // Formatted Start & Current/End Time stamps
+  const startStamp = startTime ? formatTime(startTime) : (isRunning || elapsedSeconds > 0 ? formatTime(new Date(Date.now() - elapsedSeconds * 1000)) : '--');
+  const currentStamp = endTime ? formatTime(endTime) : (isRunning || elapsedSeconds > 0 ? formatTime(new Date()) : '--');
 
   return (
     <div className="flex flex-col items-center justify-center py-2 sm:py-4">
-      {/* Status Badge */}
+      {/* Visual Working Hours Status Badge */}
       <div className="flex items-center gap-2 mb-3">
         <span
           className={`inline-block w-3 h-3 rounded-full ${
             isRunning
               ? 'bg-emerald-500 animate-pulse ring-4 ring-emerald-200'
               : isCompleted
-              ? 'bg-red-500 ring-4 ring-red-200 animate-bounce'
+              ? 'bg-emerald-600 ring-4 ring-emerald-200'
               : elapsedSeconds > 0
               ? 'bg-amber-500'
               : 'bg-gray-400'
@@ -42,12 +53,12 @@ export default function CircularCountdown({
         />
         <span className="text-xs font-black uppercase tracking-wider text-gray-700">
           {isCompleted
-            ? 'COUNTDOWN COMPLETED'
+            ? 'TARGET WORK HOURS COMPLETED'
             : isRunning
-            ? 'COUNTDOWN RUNNING'
+            ? 'WORKING HOURS IN PROGRESS'
             : elapsedSeconds > 0
-            ? 'COUNTDOWN PAUSED'
-            : 'READY TO START'}
+            ? 'WORKING HOURS PAUSED'
+            : 'READY TO START WORK'}
         </span>
       </div>
 
@@ -68,12 +79,12 @@ export default function CircularCountdown({
             fill="transparent"
           />
 
-          {/* Foreground Progress Ring (Empties as remaining time drops) */}
+          {/* Foreground Working Hours Ring (Fills up with working hours) */}
           <circle
             cx={size / 2}
             cy={size / 2}
             r={radius}
-            stroke={isCompleted ? '#C53030' : '#1F5E3B'}
+            stroke={isCompleted ? '#16452B' : '#1F5E3B'}
             strokeWidth={strokeWidth}
             strokeDasharray={circumference}
             strokeDashoffset={strokeDashoffset}
@@ -83,33 +94,40 @@ export default function CircularCountdown({
           />
         </svg>
 
-        {/* Center Content */}
+        {/* Center Working Hours Content (Replacing Countdown) */}
         <div className="absolute inset-0 flex flex-col items-center justify-center text-center p-4">
-          <div className="text-xs font-bold text-gray-500 uppercase tracking-widest">
-            Remaining Time
+          <div className="text-[11px] font-black text-[#1F5E3B] uppercase tracking-widest flex items-center gap-1">
+            <Clock className="w-3.5 h-3.5" /> Working Hours
           </div>
 
-          <div
-            className={`text-4xl sm:text-5xl font-black font-timer tracking-tight my-1 ${
-              isCompleted ? 'text-red-700 animate-pulse' : 'text-[#1F5E3B]'
-            }`}
-          >
+          <div className="text-4xl sm:text-5xl font-black font-timer tracking-tight text-[#1F5E3B] my-1">
             {timeDisplay}
           </div>
 
-          <div className="text-[11px] font-semibold text-gray-600">
-            Worked: <span className="font-bold text-[#1A1A1A]">{formatDigitalTime(elapsedSeconds)}</span>
+          <div className="text-xs font-bold text-gray-800">
+            {workingHoursDecimal} Hours ({workingMinutes} mins)
           </div>
 
-          <div className="text-[10px] text-gray-500 mt-0.5">
-            Target: {Math.round(totalTargetSeconds / 60)} mins
-          </div>
+          {targetMinutes > 0 && (
+            <div className="text-[10px] text-gray-500 mt-0.5 font-medium">
+              Target: {targetMinutes} mins
+            </div>
+          )}
         </div>
       </div>
 
-      {/* Live Accrued Amount Pill */}
+      {/* Start Time & End/Current Time Info Card */}
+      {(isRunning || elapsedSeconds > 0) && (
+        <div className="mt-3 flex items-center justify-center gap-4 text-xs font-semibold text-gray-600 bg-white border border-gray-200 px-4 py-1.5 rounded-xl shadow-xs">
+          <span><strong>Start Time:</strong> {startStamp}</span>
+          <span className="text-gray-300">|</span>
+          <span><strong>{isRunning ? 'Current Time' : 'End Time'}:</strong> {currentStamp}</span>
+        </div>
+      )}
+
+      {/* Live Accrued Work Amount Pill */}
       {ratePerMinute > 0 && (
-        <div className="mt-4 inline-flex items-center gap-2 bg-[#F7F7F5] border border-[#E2E2DC] px-4 py-2 rounded-xl text-center shadow-inner">
+        <div className="mt-3 inline-flex items-center gap-2 bg-[#F7F7F5] border border-[#E2E2DC] px-4 py-2 rounded-xl text-center shadow-inner">
           <span className="text-xs font-bold text-gray-600">Actual Work Amount:</span>
           <span className="text-base font-black text-[#1F5E3B] font-timer">
             ₹{accruedAmount.toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}

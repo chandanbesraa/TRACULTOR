@@ -6,6 +6,7 @@ import AdminLogin from './components/AdminLogin';
 import CompleteJobModal from './components/CompleteJobModal';
 import CustomerDetailsModal from './components/CustomerDetailsModal';
 import EditCustomerModal from './components/EditCustomerModal';
+import CustomerProfileModal from './components/CustomerProfileModal';
 import Diary from './pages/Diary';
 import HistoryMonthly from './pages/HistoryMonthly';
 import AddCustomer from './pages/AddCustomer';
@@ -25,6 +26,12 @@ import {
   fetchUserQueue,
   saveQueuedCustomer,
   removeQueuedCustomer,
+  fetchUserPayments,
+  saveUserPayment,
+  updateUserPayment,
+  deleteUserPayment,
+  fetchCustomerProfiles,
+  saveCustomerProfile,
 } from './utils/supabaseStorage';
 import {
   initializeStorage,
@@ -50,10 +57,13 @@ export default function App() {
   const [customersQueue, setCustomersQueue] = useState([]);
   const [activeCustomerId, setActiveCustId] = useState('');
   const [completedRecords, setCompletedRecords] = useState([]);
+  const [payments, setPayments] = useState([]);
+  const [savedProfiles, setSavedProfiles] = useState([]);
 
   // Modals & Popups
   const [completeJobState, setCompleteJobState] = useState(null);
   const [selectedRecordForDetails, setSelectedRecordForDetails] = useState(null);
+  const [selectedCustomerForProfile, setSelectedCustomerForProfile] = useState(null);
   const [editingCustomer, setEditingCustomer] = useState(null);
   const [toastMessage, setToastMessage] = useState(null);
 
@@ -134,16 +144,20 @@ export default function App() {
     initAuth();
   }, []);
 
-  // Load customer records & queue from Supabase / Storage
+  // Load customer records, queue, payments & profiles from Supabase / Storage
   const loadCustomerData = async (userId) => {
     if (!userId) return;
     try {
-      const [records, queue] = await Promise.all([
+      const [records, queue, pays, profs] = await Promise.all([
         fetchUserJobs(userId),
         fetchUserQueue(userId),
+        fetchUserPayments(userId),
+        fetchCustomerProfiles(userId),
       ]);
       setCompletedRecords(records || []);
       setCustomersQueue(queue || []);
+      setPayments(pays || []);
+      setSavedProfiles(profs || []);
       if (queue && queue.length > 0) {
         setActiveCustId(queue[0].id);
       } else {
@@ -222,10 +236,45 @@ export default function App() {
     setCurrentUser(null);
     setCustomersQueue([]);
     setCompletedRecords([]);
+    setPayments([]);
+    setSavedProfiles([]);
+    setSelectedCustomerForProfile(null);
     setActiveCustId('');
     handleResetTimer();
     setActiveTab('diary');
     showToast('Logged out securely');
+  };
+
+  // Payment Management Handlers
+  const handleSavePayment = async (newPayment) => {
+    const effectiveUser = currentUser || DEFAULT_LOCAL_OPERATOR;
+    const updated = await saveUserPayment(effectiveUser.id, newPayment);
+    setPayments(updated);
+    showToast(`Payment of ₹${newPayment.amount} recorded`);
+  };
+
+  const handleUpdatePayment = async (updatedPayment) => {
+    const effectiveUser = currentUser || DEFAULT_LOCAL_OPERATOR;
+    const updated = await updateUserPayment(effectiveUser.id, updatedPayment);
+    setPayments(updated);
+    showToast('Payment updated successfully');
+  };
+
+  const handleDeletePayment = async (paymentId) => {
+    const effectiveUser = currentUser || DEFAULT_LOCAL_OPERATOR;
+    const updated = await deleteUserPayment(effectiveUser.id, paymentId);
+    setPayments(updated);
+    showToast('Payment deleted permanently');
+  };
+
+  const handleSaveCustomerProfile = async (profile) => {
+    const effectiveUser = currentUser || DEFAULT_LOCAL_OPERATOR;
+    const updated = await saveCustomerProfile(effectiveUser.id, profile);
+    setSavedProfiles(updated);
+  };
+
+  const handleOpenCustomerProfile = (customer) => {
+    setSelectedCustomerForProfile(customer);
   };
 
   // Admin Portal Handlers
@@ -332,6 +381,7 @@ export default function App() {
     const effectiveUser = currentUser || DEFAULT_LOCAL_OPERATOR;
     const updated = await saveQueuedCustomer(effectiveUser.id, newCustomer);
     setCustomersQueue(updated);
+    await handleSaveCustomerProfile(newCustomer);
     setActiveCustId(newCustomer.id);
     setActiveTab('diary');
 
@@ -352,6 +402,7 @@ export default function App() {
     const effectiveUser = currentUser || DEFAULT_LOCAL_OPERATOR;
     const updated = await saveQueuedCustomer(effectiveUser.id, newCustomer);
     setCustomersQueue(updated);
+    await handleSaveCustomerProfile(newCustomer);
     setActiveTab('diary');
     showToast(`Added ${newCustomer.customerName} to work queue`);
   };
@@ -360,6 +411,7 @@ export default function App() {
     const effectiveUser = currentUser || DEFAULT_LOCAL_OPERATOR;
     const updated = await saveQueuedCustomer(effectiveUser.id, updatedCust);
     setCustomersQueue(updated);
+    await handleSaveCustomerProfile(updatedCust);
   };
 
   const handleEndWork = (jobData) => {
@@ -482,6 +534,7 @@ export default function App() {
             activeCustomer={activeCustomer}
             customersQueue={customersQueue}
             completedRecords={completedRecords}
+            payments={payments}
             activeTimerState={activeTimerPayload}
             onStartTimer={handleStartTimer}
             onPauseTimer={handlePauseTimer}
@@ -494,6 +547,7 @@ export default function App() {
             onAdjustCountdownDuration={handleAdjustCountdownDuration}
             onSaveCompletedJob={handleSaveCompletedJob}
             onOpenAddCustomer={() => setActiveTab('add_customer')}
+            onOpenCustomerProfile={handleOpenCustomerProfile}
             onViewRecordDetails={(record) => setSelectedRecordForDetails(record)}
             onDeleteRecord={handleDeleteRecord}
           />
@@ -511,8 +565,12 @@ export default function App() {
         {/* Add Customer Tab */}
         {activeTab === 'add_customer' && (
           <AddCustomer
+            savedProfiles={savedProfiles}
+            completedRecords={completedRecords}
+            payments={payments}
             onStartCustomerWork={handleStartCustomerWork}
             onSaveToQueue={handleSaveToQueue}
+            onOpenCustomerProfile={handleOpenCustomerProfile}
           />
         )}
 
@@ -564,6 +622,25 @@ export default function App() {
           onClose={() => setSelectedRecordForDetails(null)}
           onDelete={handleDeleteRecord}
           onUpdateRecord={handleUpdateRecord}
+          onOpenCustomerProfile={handleOpenCustomerProfile}
+        />
+      )}
+
+      {/* Reusable Customer Profile & Payment Ledger Modal */}
+      {selectedCustomerForProfile && (
+        <CustomerProfileModal
+          customer={selectedCustomerForProfile}
+          completedRecords={completedRecords}
+          payments={payments}
+          onClose={() => setSelectedCustomerForProfile(null)}
+          onSavePayment={handleSavePayment}
+          onUpdatePayment={handleUpdatePayment}
+          onDeletePayment={handleDeletePayment}
+          onUpdateCustomer={async (updated) => {
+            await handleUpdateCustomer(updated);
+            await handleSaveCustomerProfile(updated);
+            setSelectedCustomerForProfile(updated);
+          }}
         />
       )}
 

@@ -64,19 +64,11 @@ async function ensureProfileExists(userId) {
 /**
  * Fetch all completed jobs for the current authenticated user (with APK & offline resilience)
  */
-export async function fetchUserJobs(userId = 'trac_local_operator') {
-  const effectiveUserId = userId || 'trac_local_operator';
+export async function fetchUserJobs(userId) {
+  if (!userId) return [];
+  const effectiveUserId = userId;
   const key = getUserStorageKey(effectiveUserId, 'jobs');
-  let cachedLocal = JSON.parse(localStorage.getItem(key) || '[]');
-
-  // If local list is empty, fallback to universal APK backup storage
-  if (cachedLocal.length === 0) {
-    const universal = JSON.parse(localStorage.getItem('traculator_universal_jobs_v1') || '[]');
-    if (universal.length > 0) {
-      cachedLocal = universal;
-      localStorage.setItem(key, JSON.stringify(cachedLocal));
-    }
-  }
+  const cachedLocal = JSON.parse(localStorage.getItem(key) || '[]');
 
   if (isSupabaseConfigured() && supabase && isValidUuid(effectiveUserId)) {
     try {
@@ -87,7 +79,7 @@ export async function fetchUserJobs(userId = 'trac_local_operator') {
         .order('created_at', { ascending: false });
 
       if (error) {
-        console.error('Supabase fetchUserJobs error:', error);
+        console.warn('Supabase fetchUserJobs notice:', error.message);
         return cachedLocal;
       }
 
@@ -114,24 +106,11 @@ export async function fetchUserJobs(userId = 'trac_local_operator') {
         createdAt: r.created_at,
       }));
 
-      // Merge remote records with any local records
-      const mergedMap = new Map();
-      mapped.forEach(item => mergedMap.set(item.id, item));
-      cachedLocal.forEach(item => {
-        if (!mergedMap.has(item.id)) {
-          mergedMap.set(item.id, item);
-        }
-      });
-
-      const merged = Array.from(mergedMap.values()).sort(
-        (a, b) => new Date(b.createdAt || b.date) - new Date(a.createdAt || a.date)
-      );
-
-      localStorage.setItem(key, JSON.stringify(merged));
-      localStorage.setItem('traculator_universal_jobs_v1', JSON.stringify(merged));
-      return merged;
+      // Cache strictly for this authenticated user
+      localStorage.setItem(key, JSON.stringify(mapped));
+      return mapped;
     } catch (err) {
-      console.error('fetchUserJobs remote fetch error:', err);
+      console.warn('fetchUserJobs remote fetch issue:', err);
       return cachedLocal;
     }
   }
@@ -142,23 +121,18 @@ export async function fetchUserJobs(userId = 'trac_local_operator') {
 /**
  * Save a completed job record (Guaranteed storage in APK and Supabase)
  */
-export async function saveUserJob(userId = 'trac_local_operator', record) {
-  if (!record) return [];
+export async function saveUserJob(userId, record) {
+  if (!userId || !record) return [];
 
-  const effectiveUserId = userId || 'trac_local_operator';
+  const effectiveUserId = userId;
   const key = getUserStorageKey(effectiveUserId, 'jobs');
   const existing = JSON.parse(localStorage.getItem(key) || '[]');
   const updatedLocal = [record, ...existing.filter(r => r.id !== record.id)];
   
-  // 1. Save directly to local user storage (Instant in APK)
+  // Save directly to user-specific local storage
   localStorage.setItem(key, JSON.stringify(updatedLocal));
 
-  // 2. Save to universal APK backup storage
-  const universal = JSON.parse(localStorage.getItem('traculator_universal_jobs_v1') || '[]');
-  const updatedUniversal = [record, ...universal.filter(r => r.id !== record.id)];
-  localStorage.setItem('traculator_universal_jobs_v1', JSON.stringify(updatedUniversal));
-
-  // 3. Sync to Supabase if configured and valid UUID
+  // Sync to Supabase if configured and valid UUID
   if (isSupabaseConfigured() && supabase && isValidUuid(effectiveUserId)) {
     try {
       await ensureProfileExists(effectiveUserId);
@@ -188,10 +162,10 @@ export async function saveUserJob(userId = 'trac_local_operator', record) {
 
       const { error } = await supabase.from('jobs').upsert(payload);
       if (error) {
-        console.error('Supabase saveUserJob error:', error);
+        console.warn('Supabase saveUserJob notice:', error.message);
       }
     } catch (err) {
-      console.warn('Supabase remote save warning:', err);
+      console.warn('Supabase remote save issue:', err);
     }
   }
 
@@ -201,26 +175,21 @@ export async function saveUserJob(userId = 'trac_local_operator', record) {
 /**
  * Update a completed job record
  */
-export async function updateUserJob(userId = 'trac_local_operator', updatedRecord) {
+export async function updateUserJob(userId, updatedRecord) {
   return saveUserJob(userId, updatedRecord);
 }
 
 /**
  * Delete a completed job record
  */
-export async function deleteUserJob(userId = 'trac_local_operator', recordId) {
-  if (!recordId) return [];
+export async function deleteUserJob(userId, recordId) {
+  if (!userId || !recordId) return [];
 
-  const effectiveUserId = userId || 'trac_local_operator';
+  const effectiveUserId = userId;
   const key = getUserStorageKey(effectiveUserId, 'jobs');
   const existing = JSON.parse(localStorage.getItem(key) || '[]');
   const updatedLocal = existing.filter(r => r.id !== recordId);
   localStorage.setItem(key, JSON.stringify(updatedLocal));
-
-  // Update universal backup storage
-  const universal = JSON.parse(localStorage.getItem('traculator_universal_jobs_v1') || '[]');
-  const updatedUniversal = universal.filter(r => r.id !== recordId);
-  localStorage.setItem('traculator_universal_jobs_v1', JSON.stringify(updatedUniversal));
 
   if (isSupabaseConfigured() && supabase && isValidUuid(effectiveUserId)) {
     try {
@@ -230,9 +199,9 @@ export async function deleteUserJob(userId = 'trac_local_operator', recordId) {
         .eq('id', recordId)
         .eq('user_id', effectiveUserId);
 
-      if (error) console.error('Supabase deleteUserJob error:', error);
+      if (error) console.warn('Supabase deleteUserJob notice:', error.message);
     } catch (err) {
-      console.error('deleteUserJob remote error:', err);
+      console.warn('deleteUserJob remote error:', err);
     }
   }
 
@@ -242,10 +211,11 @@ export async function deleteUserJob(userId = 'trac_local_operator', recordId) {
 /**
  * Fetch customer work queue
  */
-export async function fetchUserQueue(userId = 'trac_local_operator') {
-  const effectiveUserId = userId || 'trac_local_operator';
+export async function fetchUserQueue(userId) {
+  if (!userId) return [];
+  const effectiveUserId = userId;
   const key = getUserStorageKey(effectiveUserId, 'queue');
-  let cachedLocal = JSON.parse(localStorage.getItem(key) || '[]');
+  const cachedLocal = JSON.parse(localStorage.getItem(key) || '[]');
 
   if (isSupabaseConfigured() && supabase && isValidUuid(effectiveUserId)) {
     try {
@@ -256,7 +226,7 @@ export async function fetchUserQueue(userId = 'trac_local_operator') {
         .order('created_at', { ascending: false });
 
       if (error) {
-        console.error('Supabase fetchUserQueue error:', error);
+        console.warn('Supabase fetchUserQueue notice:', error.message);
         return cachedLocal;
       }
 
@@ -279,7 +249,7 @@ export async function fetchUserQueue(userId = 'trac_local_operator') {
       localStorage.setItem(key, JSON.stringify(mapped));
       return mapped;
     } catch (err) {
-      console.error('fetchUserQueue remote error:', err);
+      console.warn('fetchUserQueue remote error:', err);
       return cachedLocal;
     }
   }
@@ -290,10 +260,10 @@ export async function fetchUserQueue(userId = 'trac_local_operator') {
 /**
  * Add / Update queued customer
  */
-export async function saveQueuedCustomer(userId = 'trac_local_operator', customer) {
-  if (!customer) return [];
+export async function saveQueuedCustomer(userId, customer) {
+  if (!userId || !customer) return [];
 
-  const effectiveUserId = userId || 'trac_local_operator';
+  const effectiveUserId = userId;
   const key = getUserStorageKey(effectiveUserId, 'queue');
   const existing = JSON.parse(localStorage.getItem(key) || '[]');
   const updatedLocal = [customer, ...existing.filter(c => c.id !== customer.id)];
@@ -320,9 +290,9 @@ export async function saveQueuedCustomer(userId = 'trac_local_operator', custome
       };
 
       const { error } = await supabase.from('customer_queue').upsert(payload);
-      if (error) console.error('Supabase saveQueuedCustomer error:', error);
+      if (error) console.warn('Supabase saveQueuedCustomer notice:', error.message);
     } catch (err) {
-      console.error('saveQueuedCustomer remote error:', err);
+      console.warn('saveQueuedCustomer remote error:', err);
     }
   }
 
@@ -332,10 +302,10 @@ export async function saveQueuedCustomer(userId = 'trac_local_operator', custome
 /**
  * Remove queued customer
  */
-export async function removeQueuedCustomer(userId = 'trac_local_operator', customerId) {
-  if (!customerId) return [];
+export async function removeQueuedCustomer(userId, customerId) {
+  if (!userId || !customerId) return [];
 
-  const effectiveUserId = userId || 'trac_local_operator';
+  const effectiveUserId = userId;
   const key = getUserStorageKey(effectiveUserId, 'queue');
   const existing = JSON.parse(localStorage.getItem(key) || '[]');
   const updatedLocal = existing.filter(c => c.id !== customerId);
@@ -349,9 +319,9 @@ export async function removeQueuedCustomer(userId = 'trac_local_operator', custo
         .eq('id', customerId)
         .eq('user_id', effectiveUserId);
 
-      if (error) console.error('Supabase removeQueuedCustomer error:', error);
+      if (error) console.warn('Supabase removeQueuedCustomer notice:', error.message);
     } catch (err) {
-      console.error('removeQueuedCustomer remote error:', err);
+      console.warn('removeQueuedCustomer remote error:', err);
     }
   }
 
@@ -361,7 +331,8 @@ export async function removeQueuedCustomer(userId = 'trac_local_operator', custo
 /**
  * Update Profile Details in public.profiles (id, name, phone, email, address, updated_at)
  */
-export async function updateUserProfile(userId = 'trac_local_operator', updates) {
+export async function updateUserProfile(userId, updates) {
+  if (!userId) return null;
   const current = JSON.parse(localStorage.getItem('traculator_current_user_v1') || '{}');
   const updated = { ...current, ...updates };
   localStorage.setItem('traculator_current_user_v1', JSON.stringify(updated));
@@ -393,6 +364,288 @@ export async function updateUserProfile(userId = 'trac_local_operator', updates)
   }
 
   return updated;
+}
+
+// =========================================================
+// CUSTOMER PAYMENTS & REUSABLE PROFILES STORAGE
+// =========================================================
+
+/**
+ * Fetch all payments for the current user/operator
+ */
+export async function fetchUserPayments(userId) {
+  if (!userId) return [];
+  const effectiveUserId = userId;
+  const key = getUserStorageKey(effectiveUserId, 'payments');
+  const cachedLocal = JSON.parse(localStorage.getItem(key) || '[]');
+
+  if (isSupabaseConfigured() && supabase && isValidUuid(effectiveUserId)) {
+    try {
+      const { data, error } = await supabase
+        .from('payments')
+        .select('*')
+        .eq('user_id', effectiveUserId)
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.warn('Supabase fetchUserPayments notice:', error.message);
+        return cachedLocal;
+      }
+
+      const mapped = (data || []).map(p => ({
+        id: p.id,
+        userId: p.user_id,
+        customerId: p.customer_id,
+        customerName: p.customer_name,
+        mobileNumber: p.mobile_number || '',
+        amount: Number(p.amount) || 0,
+        date: p.date,
+        time: p.time,
+        timestamp: p.timestamp || p.created_at,
+        paymentMode: p.payment_mode || 'Cash',
+        notes: p.notes || '',
+        createdAt: p.created_at,
+      }));
+
+      localStorage.setItem(key, JSON.stringify(mapped));
+      return mapped;
+    } catch (err) {
+      console.warn('Supabase fetchUserPayments error:', err);
+      return cachedLocal;
+    }
+  }
+
+  return cachedLocal;
+}
+
+/**
+ * Save a new or updated payment record
+ */
+export async function saveUserPayment(userId, payment) {
+  if (!userId || !payment) return [];
+
+  const effectiveUserId = userId;
+  const key = getUserStorageKey(effectiveUserId, 'payments');
+  const existing = JSON.parse(localStorage.getItem(key) || '[]');
+  const updatedLocal = [payment, ...existing.filter(p => p.id !== payment.id)];
+
+  localStorage.setItem(key, JSON.stringify(updatedLocal));
+
+  if (isSupabaseConfigured() && supabase && isValidUuid(effectiveUserId)) {
+    try {
+      await ensureProfileExists(effectiveUserId);
+
+      const payload = {
+        id: payment.id,
+        user_id: effectiveUserId,
+        customer_id: payment.customerId || null,
+        customer_name: payment.customerName || 'Customer',
+        mobile_number: payment.mobileNumber || '',
+        amount: Number(payment.amount) || 0,
+        date: payment.date || new Date().toISOString().split('T')[0],
+        time: payment.time || '',
+        timestamp: safeIsoDate(payment.timestamp || payment.createdAt),
+        payment_mode: payment.paymentMode || 'Cash',
+        notes: payment.notes || '',
+        created_at: safeIsoDate(payment.createdAt),
+      };
+
+      const { error } = await supabase.from('payments').upsert(payload);
+      if (error) console.warn('Supabase saveUserPayment note:', error.message);
+    } catch (err) {
+      console.warn('saveUserPayment remote error:', err);
+    }
+  }
+
+  return updatedLocal;
+}
+
+/**
+ * Update an existing payment record
+ */
+export async function updateUserPayment(userId, updatedPayment) {
+  return saveUserPayment(userId, updatedPayment);
+}
+
+/**
+ * Delete a payment record
+ */
+export async function deleteUserPayment(userId, paymentId) {
+  if (!userId || !paymentId) return [];
+
+  const effectiveUserId = userId;
+  const key = getUserStorageKey(effectiveUserId, 'payments');
+  const existing = JSON.parse(localStorage.getItem(key) || '[]');
+  const updatedLocal = existing.filter(p => p.id !== paymentId);
+  localStorage.setItem(key, JSON.stringify(updatedLocal));
+
+  if (isSupabaseConfigured() && supabase && isValidUuid(effectiveUserId)) {
+    try {
+      const { error } = await supabase
+        .from('payments')
+        .delete()
+        .eq('id', paymentId)
+        .eq('user_id', effectiveUserId);
+
+      if (error) console.warn('Supabase deleteUserPayment note:', error.message);
+    } catch (err) {
+      console.warn('deleteUserPayment remote error:', err);
+    }
+  }
+
+  return updatedLocal;
+}
+
+/**
+ * Fetch reusable Customer Profiles (Aggregated from Supabase and user-specific local jobs & queue)
+ */
+export async function fetchCustomerProfiles(userId) {
+  if (!userId) return [];
+  const effectiveUserId = userId;
+  const key = getUserStorageKey(effectiveUserId, 'customer_profiles');
+  const cachedLocal = JSON.parse(localStorage.getItem(key) || '[]');
+
+  let remoteProfiles = [];
+  if (isSupabaseConfigured() && supabase && isValidUuid(effectiveUserId)) {
+    try {
+      const { data, error } = await supabase
+        .from('customer_profiles')
+        .select('*')
+        .eq('user_id', effectiveUserId)
+        .order('customer_name', { ascending: true });
+
+      if (!error && data) {
+        remoteProfiles = data.map(p => ({
+          id: p.id,
+          userId: p.user_id,
+          customerName: p.customer_name,
+          mobileNumber: p.mobile_number || '',
+          address: p.address || '',
+          location: p.location || p.address || '',
+          workDescription: p.work_description || '',
+          ratePerMinute: Number(p.rate_per_minute) || 100,
+          timerMode: p.timer_mode || 'stopwatch',
+          durationMinutesPreset: p.duration_minutes_preset || 20,
+          createdAt: p.created_at,
+        }));
+      }
+    } catch (err) {
+      console.warn('Supabase fetchCustomerProfiles note:', err);
+    }
+  }
+
+  const profileMap = new Map();
+
+  // 1. Add remote profiles first (source of truth)
+  remoteProfiles.forEach(p => {
+    const normKey = (p.customerName || p.id || '').toLowerCase().trim();
+    if (normKey) profileMap.set(normKey, p);
+  });
+
+  // 2. Add local profiles for this user
+  cachedLocal.forEach(p => {
+    const normKey = (p.customerName || p.id || '').toLowerCase().trim();
+    if (normKey && !profileMap.has(normKey)) profileMap.set(normKey, p);
+  });
+
+  // 3. Discover from this user's jobs
+  const jobsKey = getUserStorageKey(effectiveUserId, 'jobs');
+  const userJobs = JSON.parse(localStorage.getItem(jobsKey) || '[]');
+  userJobs.forEach(j => {
+    const cName = (j.customerName || '').trim();
+    if (!cName) return;
+    const normKey = cName.toLowerCase();
+    if (!profileMap.has(normKey)) {
+      profileMap.set(normKey, {
+        id: j.customerId || `CUST-${Math.random().toString(36).substr(2, 6).toUpperCase()}`,
+        customerName: cName,
+        mobileNumber: j.mobileNumber || '',
+        address: j.address || '',
+        location: j.location || j.address || '',
+        workDescription: j.workDescription || 'Standard Agricultural Tractor Work',
+        ratePerMinute: Number(j.ratePerMinute) || 100,
+        timerMode: j.timerMode || 'stopwatch',
+        durationMinutesPreset: j.durationMinutesPreset || 20,
+        createdAt: j.createdAt || new Date().toISOString(),
+      });
+    }
+  });
+
+  // 4. Discover from this user's queue
+  const queueKey = getUserStorageKey(effectiveUserId, 'queue');
+  const userQueue = JSON.parse(localStorage.getItem(queueKey) || '[]');
+  userQueue.forEach(q => {
+    const cName = (q.customerName || '').trim();
+    if (!cName) return;
+    const normKey = cName.toLowerCase();
+    if (!profileMap.has(normKey)) {
+      profileMap.set(normKey, {
+        id: q.id || `CUST-${Math.random().toString(36).substr(2, 6).toUpperCase()}`,
+        customerName: cName,
+        mobileNumber: q.mobileNumber || '',
+        address: q.address || '',
+        location: q.location || q.address || '',
+        workDescription: q.workDescription || 'Standard Agricultural Tractor Work',
+        ratePerMinute: Number(q.ratePerMinute) || 100,
+        timerMode: q.timerMode || 'stopwatch',
+        durationMinutesPreset: q.durationMinutesPreset || 20,
+        createdAt: q.createdAt || new Date().toISOString(),
+      });
+    }
+  });
+
+  const allProfiles = Array.from(profileMap.values()).sort(
+    (a, b) => (a.customerName || '').localeCompare(b.customerName || '')
+  );
+
+  localStorage.setItem(key, JSON.stringify(allProfiles));
+  return allProfiles;
+}
+
+/**
+ * Save / Update a Reusable Customer Profile
+ */
+export async function saveCustomerProfile(userId, profile) {
+  if (!userId || !profile || !profile.customerName) return [];
+
+  const effectiveUserId = userId;
+  const key = getUserStorageKey(effectiveUserId, 'customer_profiles');
+  const existing = JSON.parse(localStorage.getItem(key) || '[]');
+
+  const normTarget = (profile.customerName || '').trim().toLowerCase();
+  const filtered = existing.filter(p => {
+    if (profile.id && p.id === profile.id) return false;
+    if ((p.customerName || '').trim().toLowerCase() === normTarget) return false;
+    return true;
+  });
+
+  const updatedLocal = [profile, ...filtered];
+  localStorage.setItem(key, JSON.stringify(updatedLocal));
+
+  if (isSupabaseConfigured() && supabase && isValidUuid(effectiveUserId)) {
+    try {
+      await ensureProfileExists(effectiveUserId);
+      const payload = {
+        id: profile.id,
+        user_id: effectiveUserId,
+        customer_name: profile.customerName,
+        mobile_number: profile.mobileNumber || '',
+        address: profile.address || '',
+        location: profile.location || profile.address || '',
+        work_description: profile.workDescription || '',
+        rate_per_minute: Number(profile.ratePerMinute) || 100,
+        timer_mode: profile.timerMode || 'stopwatch',
+        duration_minutes_preset: profile.durationMinutesPreset || null,
+        created_at: safeIsoDate(profile.createdAt),
+      };
+      const { error } = await supabase.from('customer_profiles').upsert(payload);
+      if (error) console.warn('Supabase saveCustomerProfile note:', error.message);
+    } catch (err) {
+      console.warn('saveCustomerProfile remote error:', err);
+    }
+  }
+
+  return updatedLocal;
 }
 
 // =========================================================

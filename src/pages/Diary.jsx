@@ -11,6 +11,7 @@ export default function Diary({
   activeCustomer,
   customersQueue,
   completedRecords,
+  payments = [],
   activeTimerState,
   onStartTimer,
   onPauseTimer,
@@ -23,6 +24,7 @@ export default function Diary({
   onAdjustCountdownDuration,
   onSaveCompletedJob,
   onOpenAddCustomer,
+  onOpenCustomerProfile,
   onViewRecordDetails,
   onDeleteRecord,
 }) {
@@ -162,8 +164,11 @@ export default function Diary({
         <CustomerCard
           customer={activeCustomer}
           allCustomers={customersQueue}
+          completedRecords={completedRecords}
+          payments={payments}
           onSelectCustomer={onSelectCustomer}
           onEditCustomer={onEditCustomer}
+          onOpenCustomerProfile={onOpenCustomerProfile}
         />
       </div>
 

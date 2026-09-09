@@ -1,11 +1,17 @@
-import React, { useState } from 'react';
-import { User, Phone, MapPin, Wrench, IndianRupee, Clock, Timer as TimerIcon, Play, Save, CheckCircle2, RotateCcw, Edit3 } from 'lucide-react';
+import React, { useState, useMemo } from 'react';
+import { User, Phone, MapPin, Wrench, IndianRupee, Clock, Timer as TimerIcon, Play, Save, CheckCircle2, RotateCcw, Edit3, Receipt, Users } from 'lucide-react';
 import { playClickFeedback } from '../utils/timer';
+import { formatCurrency, calculateCustomerBalance } from '../utils/calculations';
 
 export default function AddCustomer({
+  savedProfiles = [],
+  completedRecords = [],
+  payments = [],
   onStartCustomerWork,
   onSaveToQueue,
+  onOpenCustomerProfile,
 }) {
+  const [selectedProfileId, setSelectedProfileId] = useState('');
   const [customerName, setCustomerName] = useState('');
   const [mobileNumber, setMobileNumber] = useState('');
   const [address, setAddress] = useState('');
@@ -29,6 +35,43 @@ export default function AddCustomer({
   ];
   const durationPresets = [15, 20, 25, 30, 45, 60];
 
+  // Active matched saved customer profile if any
+  const matchedCustomerProfile = useMemo(() => {
+    if (selectedProfileId) {
+      return savedProfiles.find(p => p.id === selectedProfileId);
+    }
+    const cleanName = customerName.trim().toLowerCase();
+    if (cleanName) {
+      return savedProfiles.find(p => (p.customerName || '').trim().toLowerCase() === cleanName);
+    }
+    return null;
+  }, [selectedProfileId, customerName, savedProfiles]);
+
+  // Calculate live financial balance if existing customer matched
+  const customerBalance = useMemo(() => {
+    if (!matchedCustomerProfile) return null;
+    return calculateCustomerBalance(matchedCustomerProfile, completedRecords, payments);
+  }, [matchedCustomerProfile, completedRecords, payments]);
+
+  const handleSelectSavedProfile = (profileId) => {
+    setSelectedProfileId(profileId);
+    if (!profileId) return;
+
+    const profile = savedProfiles.find(p => p.id === profileId);
+    if (profile) {
+      playClickFeedback();
+      setCustomerName(profile.customerName || '');
+      setMobileNumber(profile.mobileNumber || '');
+      setAddress(profile.address || '');
+      setLocation(profile.location || profile.address || '');
+      setWorkDescription(profile.workDescription || 'Standard Agricultural Tractor Work');
+      setRatePerMinute(profile.ratePerMinute ? String(profile.ratePerMinute) : '100');
+      if (profile.timerMode) setTimerMode(profile.timerMode);
+      if (profile.durationMinutesPreset) setDurationMinutes(profile.durationMinutesPreset);
+      setErrors({});
+    }
+  };
+
   const validate = () => {
     const newErrors = {};
     if (!customerName.trim()) {
@@ -47,7 +90,7 @@ export default function AddCustomer({
   const createCustomerObject = () => {
     const todayStr = new Date().toISOString();
     return {
-      id: `CUST-${Date.now().toString().slice(-6)}`,
+      id: matchedCustomerProfile?.id || `CUST-${Date.now().toString().slice(-6)}`,
       customerName: customerName.trim(),
       mobileNumber: mobileNumber.trim(),
       address: address.trim(),
@@ -57,7 +100,7 @@ export default function AddCustomer({
       timerMode,
       durationMinutesPreset: timerMode === 'countdown' ? Number(durationMinutes) || 20 : null,
       status: 'in_progress',
-      createdAt: todayStr,
+      createdAt: matchedCustomerProfile?.createdAt || todayStr,
       expenses: {
         diesel: 0,
         driver: 0,
@@ -88,6 +131,7 @@ export default function AddCustomer({
 
   const handleResetForm = () => {
     playClickFeedback();
+    setSelectedProfileId('');
     setCustomerName('');
     setMobileNumber('');
     setAddress('');
@@ -125,6 +169,79 @@ export default function AddCustomer({
 
       {/* Main Form */}
       <form onSubmit={handleStartWork} className="card-base bg-white space-y-4 border-2 border-[#1F5E3B]/20">
+        {/* Saved Customers Quick Selector if existing customers exist */}
+        {savedProfiles.length > 0 && (
+          <div className="bg-emerald-50/60 border border-emerald-200 rounded-2xl p-3 space-y-2">
+            <div className="flex items-center justify-between">
+              <label className="text-[11px] font-bold text-[#1F5E3B] uppercase tracking-wider flex items-center gap-1.5">
+                <Users className="w-3.5 h-3.5" /> Select Existing Customer Profile
+              </label>
+              <span className="text-[10px] text-emerald-800 font-semibold">
+                {savedProfiles.length} Saved Profiles
+              </span>
+            </div>
+            <select
+              value={selectedProfileId}
+              onChange={(e) => handleSelectSavedProfile(e.target.value)}
+              className="w-full bg-white border border-emerald-300 rounded-xl px-3 py-2 text-xs font-bold text-gray-900 focus:outline-none focus:ring-2 focus:ring-[#1F5E3B] cursor-pointer"
+            >
+              <option value="">-- Choose an existing customer (or enter new below) --</option>
+              {savedProfiles.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.customerName} {p.mobileNumber ? `(${p.mobileNumber})` : ''} - ₹{p.ratePerMinute || 100}/min
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        {/* Existing Customer Live Balance Banner if customer matched */}
+        {customerBalance && (
+          <div className="bg-white rounded-2xl p-3 border-2 border-[#1F5E3B]/30 shadow-xs space-y-2 animate-fadeIn">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="w-6 h-6 rounded-lg bg-[#1F5E3B] text-white flex items-center justify-center font-bold text-xs">
+                  ✓
+                </div>
+                <div>
+                  <span className="text-[10px] font-bold text-gray-500 uppercase">Saved Customer Balance</span>
+                  <div className="font-bold text-gray-900 text-xs">{matchedCustomerProfile.customerName}</div>
+                </div>
+              </div>
+              {onOpenCustomerProfile && (
+                <button
+                  type="button"
+                  onClick={() => onOpenCustomerProfile(matchedCustomerProfile)}
+                  className="btn-secondary text-[11px] py-1 px-2.5 flex items-center gap-1"
+                >
+                  <Receipt className="w-3 h-3 text-[#1F5E3B]" /> Ledger / Profile
+                </button>
+              )}
+            </div>
+
+            <div className="grid grid-cols-3 gap-2 text-center text-xs pt-1 border-t border-gray-100">
+              <div className="bg-[#F7F7F5] rounded-lg p-1.5">
+                <span className="text-[9px] uppercase font-bold text-gray-500 block">Total Work</span>
+                <span className="font-black text-gray-900 font-timer">
+                  {formatCurrency(customerBalance.totalAmount)}
+                </span>
+              </div>
+              <div className="bg-[#F7F7F5] rounded-lg p-1.5">
+                <span className="text-[9px] uppercase font-bold text-blue-600 block">Paid</span>
+                <span className="font-black text-blue-700 font-timer">
+                  {formatCurrency(customerBalance.paidAmount)}
+                </span>
+              </div>
+              <div className={`rounded-lg p-1.5 ${customerBalance.pendingAmount > 0 ? 'bg-red-50 text-red-700' : 'bg-emerald-50 text-emerald-700'}`}>
+                <span className="text-[9px] uppercase font-bold block">Pending</span>
+                <span className="font-black font-timer">
+                  {formatCurrency(customerBalance.pendingAmount)}
+                </span>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Customer Name */}
         <div className="space-y-1">
           <label className="text-xs font-bold text-gray-800 flex items-center gap-1.5">
@@ -136,6 +253,7 @@ export default function AddCustomer({
             value={customerName}
             onChange={(e) => {
               setCustomerName(e.target.value);
+              setSelectedProfileId('');
               if (errors.customerName) setErrors({ ...errors, customerName: null });
             }}
             className={`w-full bg-[#F7F7F5] border rounded-xl px-3.5 py-3 text-base font-bold text-gray-900 focus:bg-white outline-none transition-colors ${

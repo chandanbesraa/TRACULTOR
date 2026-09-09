@@ -8,6 +8,12 @@ import {
   formatCurrency,
   formatDuration,
   formatDate,
+  formatTime,
+  formatDateInput,
+  formatTimeInput,
+  formatDateToDDMMYYYY,
+  formatTimeToHHMMSS,
+  parseDateAndTimeToDate,
 } from '../utils/calculations';
 import { generateCustomerBillPDF } from '../utils/pdfGenerator';
 import { playClickFeedback } from '../utils/timer';
@@ -17,23 +23,13 @@ export default function ManualWorkForm({
   onSaveCompletedJob,
   onResetSession,
 }) {
-  // Helper to format Date object into "YYYY-MM-DDTHH:MM" for datetime-local input
-  const getTodayDateTimeLocal = (hoursOffset = 0) => {
-    const now = new Date();
-    if (hoursOffset) {
-      now.setHours(now.getHours() - hoursOffset);
-    }
-    const year = now.getFullYear();
-    const month = String(now.getMonth() + 1).padStart(2, '0');
-    const day = String(now.getDate()).padStart(2, '0');
-    const hours = String(now.getHours()).padStart(2, '0');
-    const minutes = String(now.getMinutes()).padStart(2, '0');
-    return `${year}-${month}-${day}T${hours}:${minutes}`;
-  };
+  // State: Independent Date (DD/MM/YYYY) and Time (HH:MM:SS / HH:MM:SS:MS) typing fields
+  // Both fields start COMPLETELY BLANK as requested (no auto-filled date/time)
+  const [startDate, setStartDate] = useState('');
+  const [startTime, setStartTime] = useState('');
+  const [endDate, setEndDate] = useState('');
+  const [endTime, setEndTime] = useState('');
 
-  // State
-  const [startDateTime, setStartDateTime] = useState(getTodayDateTimeLocal(1)); // 1 hour ago
-  const [endDateTime, setEndDateTime] = useState(getTodayDateTimeLocal(0)); // now
   const [ratePerMinute, setRatePerMinute] = useState(
     activeCustomer?.ratePerMinute !== undefined ? String(activeCustomer.ratePerMinute) : ''
   );
@@ -54,9 +50,16 @@ export default function ManualWorkForm({
     }
   }, [activeCustomer?.id]);
 
-  // Calculations
-  const durationSeconds = calculateDurationBetweenDates(startDateTime, endDateTime);
+  // Parse Date objects from typed DD/MM/YYYY and HH:MM:SS inputs
+  const startDateObj = startDate && startTime ? parseDateAndTimeToDate(startDate, startTime) : null;
+  const endDateObj = endDate && endTime ? parseDateAndTimeToDate(endDate, endTime) : null;
+
+  // Calculate Working Hours using Start Time and End Time data
+  const durationSeconds = startDateObj && endDateObj ? calculateDurationBetweenDates(startDateObj, endDateObj) : 0;
   const workingMinutes = Math.round((durationSeconds / 60) * 10) / 10;
+  const workingHours = Math.round((durationSeconds / 3600) * 100) / 100;
+  const workingHoursFormatted = formatDuration(durationSeconds, 'short');
+
   const numRate = Number(ratePerMinute) || 0;
   const workAmount = calculateWorkAmount(numRate, durationSeconds);
   const totalExpenses = calculateTotalExpenses(expenses);
@@ -85,8 +88,10 @@ export default function ManualWorkForm({
 
   const handleReset = () => {
     playClickFeedback();
-    setStartDateTime(getTodayDateTimeLocal(1));
-    setEndDateTime(getTodayDateTimeLocal(0));
+    setStartDate('');
+    setStartTime('');
+    setEndDate('');
+    setEndTime('');
     setRatePerMinute(activeCustomer?.ratePerMinute ? String(activeCustomer.ratePerMinute) : '');
     setExpenses({ diesel: 0, driver: 0, food: 0, other: 0 });
     setErrorMsg('');
@@ -94,8 +99,20 @@ export default function ManualWorkForm({
   };
 
   const buildFinalRecord = () => {
-    if (!startDateTime || !endDateTime) {
-      setErrorMsg('Please enter both Start Date & Time and End Date & Time.');
+    if (!startDate.trim() || !startTime.trim()) {
+      setErrorMsg('Please enter both Start Date and Start Time.');
+      return null;
+    }
+    if (!endDate.trim() || !endTime.trim()) {
+      setErrorMsg('Please enter both End Date and End Time.');
+      return null;
+    }
+    if (!startDateObj) {
+      setErrorMsg('Invalid Start Date or Time format. Use DD/MM/YYYY and HH:MM:SS.');
+      return null;
+    }
+    if (!endDateObj) {
+      setErrorMsg('Invalid End Date or Time format. Use DD/MM/YYYY and HH:MM:SS.');
       return null;
     }
     if (durationSeconds <= 0) {
@@ -107,7 +124,7 @@ export default function ManualWorkForm({
       return null;
     }
 
-    const todayStr = (startDateTime ? startDateTime.split('T')[0] : new Date().toISOString().split('T')[0]);
+    const todayStr = startDateObj.toISOString().split('T')[0];
     const timestamp = Date.now();
     return {
       id: `TRAC-${todayStr.replace(/-/g, '')}-${String(timestamp).slice(-4)}`,
@@ -119,8 +136,8 @@ export default function ManualWorkForm({
       ratePerMinute: numRate,
       timerMode: 'manual',
       durationMinutesPreset: null,
-      startTime: new Date(startDateTime).toISOString(),
-      endTime: new Date(endDateTime).toISOString(),
+      startTime: startDateObj.toISOString(),
+      endTime: endDateObj.toISOString(),
       durationSeconds,
       workAmount,
       expenses,
@@ -149,14 +166,14 @@ export default function ManualWorkForm({
 
   return (
     <div className="card-base border-2 border-[#1F5E3B]/20 bg-white space-y-4">
-      {/* Title & Badge */}
+      {/* Title & Reset Button */}
       <div className="flex items-center justify-between pb-2.5 border-b border-[#E2E2DC]">
         <div>
           <h3 className="text-sm sm:text-base font-black text-[#1A1A1A] flex items-center gap-1.5">
             <Calendar className="w-4 h-4 text-[#1F5E3B]" /> Manual Tractor Work Entry
           </h3>
           <p className="text-[11px] text-gray-500">
-            Enter start/end times manually to calculate duration and earnings
+            Type Start & End Date (DD/MM/YYYY) and Time (HH:MM:SS) to calculate working hours
           </p>
         </div>
         <button
@@ -175,38 +192,108 @@ export default function ManualWorkForm({
         </div>
       )}
 
-      {/* Date & Time Inputs */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        {/* Start Date & Time */}
-        <div className="space-y-1">
-          <label className="text-xs font-bold text-gray-700 flex items-center gap-1">
-            <Clock className="w-3.5 h-3.5 text-[#1F5E3B]" /> Start Date & Time *
-          </label>
-          <input
-            type="datetime-local"
-            value={startDateTime}
-            onChange={(e) => {
-              setStartDateTime(e.target.value);
-              setErrorMsg('');
-            }}
-            className="w-full bg-[#F7F7F5] border border-gray-300 rounded-xl px-3 py-2.5 text-sm font-bold text-gray-900 focus:bg-white focus:border-[#1F5E3B] outline-none"
-          />
+      {/* Independent Date and Time Typing Fields (Manual typing only, no slider/calendar) */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+        {/* START SECTION: Separated Date & Time */}
+        <div className="bg-[#F7F7F5] border border-gray-200 rounded-2xl p-3.5 space-y-2.5">
+          <div className="text-xs font-bold text-[#1F5E3B] flex items-center gap-1.5 uppercase tracking-wide">
+            <Clock className="w-3.5 h-3.5 text-[#1F5E3B]" /> Start Details
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            {/* Start Date (DD/MM/YYYY - auto '/' insert: 22 -> 22/ -> 22/03 -> 22/03/2026) */}
+            <div className="space-y-1">
+              <label className="text-[11px] font-bold text-gray-700 flex items-center gap-1">
+                <Calendar className="w-3 h-3 text-[#1F5E3B]" /> Start Date
+              </label>
+              <input
+                type="text"
+                inputMode="numeric"
+                placeholder="DD/MM/YYYY"
+                maxLength={10}
+                value={startDate}
+                onChange={(e) => {
+                  const formatted = formatDateInput(e.target.value, startDate);
+                  setStartDate(formatted);
+                  setErrorMsg('');
+                }}
+                className="w-full bg-white border border-gray-300 rounded-xl px-2.5 py-2 text-xs sm:text-sm font-bold font-timer text-gray-900 focus:border-[#1F5E3B] outline-none"
+              />
+              <span className="text-[9px] text-gray-400 block">e.g. 22/03/2026</span>
+            </div>
+
+            {/* Start Time (HH:MM:SS - auto ':' insert: 10 -> 10: -> 10:30 -> 10:30:05) */}
+            <div className="space-y-1">
+              <label className="text-[11px] font-bold text-gray-700 flex items-center gap-1">
+                <Clock className="w-3 h-3 text-[#1F5E3B]" /> Start Time
+              </label>
+              <input
+                type="text"
+                inputMode="numeric"
+                placeholder="HH:MM:SS"
+                maxLength={12}
+                value={startTime}
+                onChange={(e) => {
+                  const formatted = formatTimeInput(e.target.value, startTime);
+                  setStartTime(formatted);
+                  setErrorMsg('');
+                }}
+                className="w-full bg-white border border-gray-300 rounded-xl px-2.5 py-2 text-xs sm:text-sm font-bold font-timer text-gray-900 focus:border-[#1F5E3B] outline-none"
+              />
+              <span className="text-[9px] text-gray-400 block">e.g. 10:30:00</span>
+            </div>
+          </div>
         </div>
 
-        {/* End Date & Time */}
-        <div className="space-y-1">
-          <label className="text-xs font-bold text-gray-700 flex items-center gap-1">
-            <Clock className="w-3.5 h-3.5 text-[#1F5E3B]" /> End Date & Time *
-          </label>
-          <input
-            type="datetime-local"
-            value={endDateTime}
-            onChange={(e) => {
-              setEndDateTime(e.target.value);
-              setErrorMsg('');
-            }}
-            className="w-full bg-[#F7F7F5] border border-gray-300 rounded-xl px-3 py-2.5 text-sm font-bold text-gray-900 focus:bg-white focus:border-[#1F5E3B] outline-none"
-          />
+        {/* END SECTION: Separated Date & Time */}
+        <div className="bg-[#F7F7F5] border border-gray-200 rounded-2xl p-3.5 space-y-2.5">
+          <div className="text-xs font-bold text-[#1F5E3B] flex items-center gap-1.5 uppercase tracking-wide">
+            <Clock className="w-3.5 h-3.5 text-[#1F5E3B]" /> End Details
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            {/* End Date (DD/MM/YYYY - auto '/' insert: 22 -> 22/ -> 22/03 -> 22/03/2026) */}
+            <div className="space-y-1">
+              <label className="text-[11px] font-bold text-gray-700 flex items-center gap-1">
+                <Calendar className="w-3 h-3 text-[#1F5E3B]" /> End Date
+              </label>
+              <input
+                type="text"
+                inputMode="numeric"
+                placeholder="DD/MM/YYYY"
+                maxLength={10}
+                value={endDate}
+                onChange={(e) => {
+                  const formatted = formatDateInput(e.target.value, endDate);
+                  setEndDate(formatted);
+                  setErrorMsg('');
+                }}
+                className="w-full bg-white border border-gray-300 rounded-xl px-2.5 py-2 text-xs sm:text-sm font-bold font-timer text-gray-900 focus:border-[#1F5E3B] outline-none"
+              />
+              <span className="text-[9px] text-gray-400 block">e.g. 22/03/2026</span>
+            </div>
+
+            {/* End Time (HH:MM:SS - auto ':' insert: 10 -> 10: -> 10:30 -> 10:30:05) */}
+            <div className="space-y-1">
+              <label className="text-[11px] font-bold text-gray-700 flex items-center gap-1">
+                <Clock className="w-3 h-3 text-[#1F5E3B]" /> End Time
+              </label>
+              <input
+                type="text"
+                inputMode="numeric"
+                placeholder="HH:MM:SS"
+                maxLength={12}
+                value={endTime}
+                onChange={(e) => {
+                  const formatted = formatTimeInput(e.target.value, endTime);
+                  setEndTime(formatted);
+                  setErrorMsg('');
+                }}
+                className="w-full bg-white border border-gray-300 rounded-xl px-2.5 py-2 text-xs sm:text-sm font-bold font-timer text-gray-900 focus:border-[#1F5E3B] outline-none"
+              />
+              <span className="text-[9px] text-gray-400 block">e.g. 12:45:00</span>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -258,25 +345,30 @@ export default function ManualWorkForm({
         </div>
       </div>
 
-      {/* Auto Calculation Result Box */}
+      {/* Working Hours Display & Auto Calculation Card */}
       <div className="bg-emerald-50/70 border border-emerald-200 rounded-2xl p-4 space-y-3">
-        <div className="text-xs font-bold uppercase tracking-wider text-[#1F5E3B]">
-          Automatic Work & Billing Calculations
+        <div className="text-xs font-bold uppercase tracking-wider text-[#1F5E3B] flex items-center justify-between">
+          <span>Working Hours & Billing Summary</span>
+          {startTime && endTime && (
+            <span className="text-[11px] font-bold text-gray-600 font-timer">
+              {startTime} ➔ {endTime}
+            </span>
+          )}
         </div>
 
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 text-center">
-          {/* Total Duration */}
+          {/* Working Hours (Calculated using Start Time and End Time) */}
           <div className="bg-white p-2.5 rounded-xl border border-emerald-200">
-            <div className="text-[10px] uppercase font-bold text-gray-500">Working Time</div>
+            <div className="text-[10px] uppercase font-bold text-gray-500">Working Hours</div>
             <div className="text-base sm:text-lg font-black text-[#1F5E3B] font-timer mt-0.5">
-              {formatDuration(durationSeconds, 'short')}
+              {workingHours} Hours
             </div>
             <div className="text-[10px] text-gray-500 font-medium">
-              {workingMinutes} Minutes
+              {durationSeconds > 0 ? `${workingHoursFormatted} (${workingMinutes}m)` : '0 mins'}
             </div>
           </div>
 
-          {/* Rate */}
+          {/* Agreed Rate */}
           <div className="bg-white p-2.5 rounded-xl border border-emerald-200">
             <div className="text-[10px] uppercase font-bold text-gray-500">Agreed Rate</div>
             <div className="text-base sm:text-lg font-black text-gray-900 font-timer mt-0.5">

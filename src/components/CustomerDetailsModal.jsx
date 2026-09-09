@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, Download, Trash2, Calendar, Clock, MapPin, Phone, IndianRupee, FileText, CheckCircle2, Fuel, UserCheck, Utensils, MoreHorizontal, Edit3, Save } from 'lucide-react';
+import { X, Download, Trash2, Calendar, Clock, MapPin, Phone, IndianRupee, FileText, CheckCircle2, Fuel, UserCheck, Utensils, MoreHorizontal, Edit3, Save, Receipt } from 'lucide-react';
 import { formatCurrency, formatDuration, formatDate, formatTime, calculateTotalExpenses, calculateNetEarnings } from '../utils/calculations';
 import { generateCustomerBillPDF } from '../utils/pdfGenerator';
 
@@ -8,6 +8,7 @@ export default function CustomerDetailsModal({
   onClose,
   onDelete,
   onUpdateRecord,
+  onOpenCustomerProfile,
 }) {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
@@ -111,9 +112,31 @@ export default function CustomerDetailsModal({
                       {record.customerName}
                     </h4>
                   </div>
-                  <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-md bg-emerald-100 text-[#1F5E3B]">
-                    <CheckCircle2 className="w-3 h-3" /> Completed
-                  </span>
+                  <div className="flex items-center gap-2">
+                    {onOpenCustomerProfile && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onClose();
+                          onOpenCustomerProfile({
+                            id: record.customerId || record.id,
+                            customerName: record.customerName,
+                            mobileNumber: record.mobileNumber,
+                            address: record.address,
+                            location: record.location,
+                            ratePerMinute: record.ratePerMinute,
+                          });
+                        }}
+                        className="btn-secondary text-[11px] py-1 px-2.5 flex items-center gap-1 text-[#1F5E3B]"
+                        title="View full customer profile and payments"
+                      >
+                        <Receipt className="w-3.5 h-3.5" /> Ledger / Profile
+                      </button>
+                    )}
+                    <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-md bg-emerald-100 text-[#1F5E3B]">
+                      <CheckCircle2 className="w-3 h-3" /> Completed
+                    </span>
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-2 border-t border-gray-200 text-xs text-gray-700">

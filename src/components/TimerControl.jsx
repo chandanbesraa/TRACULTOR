@@ -205,6 +205,7 @@ export default function TimerControl({
               isRunning={isRunning}
               ratePerMinute={ratePerMinute}
               accruedAmount={accruedAmount}
+              startTime={activeTimerState?.startTime}
             />
           )}
 

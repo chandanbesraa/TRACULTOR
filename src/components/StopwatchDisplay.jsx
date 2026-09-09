@@ -32,7 +32,10 @@ export default function StopwatchDisplay({
         <div className="text-5xl sm:text-6xl font-black font-timer tracking-tight text-[#1F5E3B] select-none">
           {timeFormatted}
         </div>
-        <div className="text-xs font-semibold text-gray-500 uppercase tracking-widest mt-1">
+        <div className="text-xs font-bold text-gray-700 mt-1">
+          {((elapsedSeconds / 3600)).toFixed(2)} Working Hours ({Math.round((elapsedSeconds / 60) * 10) / 10} mins)
+        </div>
+        <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest mt-0.5">
           {elapsedSeconds >= 3600 ? 'Hours : Minutes : Seconds' : 'Minutes : Seconds'}
         </div>
       </div>

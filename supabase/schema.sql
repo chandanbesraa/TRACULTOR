@@ -145,3 +145,79 @@ create policy "Users can update own queue"
 create policy "Users can delete own queue"
   on public.customer_queue for delete
   using (auth.uid() = user_id);
+
+-- =========================================================
+-- 5. Payments Table (Multi-Payment Ledger per Customer)
+-- =========================================================
+create table if not exists public.payments (
+  id text primary key,
+  user_id uuid references auth.users(id) on delete cascade not null,
+  customer_id text,
+  customer_name text not null,
+  mobile_number text,
+  amount numeric not null default 0,
+  date text,
+  time text,
+  timestamp timestamp with time zone default timezone('utc'::text, now()) not null,
+  payment_mode text default 'Cash',
+  notes text,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+create index if not exists idx_payments_user_id on public.payments(user_id);
+create index if not exists idx_payments_customer_id on public.payments(customer_id);
+
+alter table public.payments enable row level security;
+
+create policy "Users can select own payments"
+  on public.payments for select
+  using (auth.uid() = user_id);
+
+create policy "Users can insert own payments"
+  on public.payments for insert
+  with check (auth.uid() = user_id);
+
+create policy "Users can update own payments"
+  on public.payments for update
+  using (auth.uid() = user_id);
+
+create policy "Users can delete own payments"
+  on public.payments for delete
+  using (auth.uid() = user_id);
+
+-- =========================================================
+-- 6. Customer Profiles Table (Reusable Customer Profiles)
+-- =========================================================
+create table if not exists public.customer_profiles (
+  id text primary key,
+  user_id uuid references auth.users(id) on delete cascade not null,
+  customer_name text not null,
+  mobile_number text,
+  address text,
+  location text,
+  work_description text,
+  rate_per_minute numeric not null default 100,
+  timer_mode text default 'stopwatch' check (timer_mode in ('stopwatch', 'countdown', 'manual')),
+  duration_minutes_preset integer,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+create index if not exists idx_customer_profiles_user_id on public.customer_profiles(user_id);
+
+alter table public.customer_profiles enable row level security;
+
+create policy "Users can select own customer profiles"
+  on public.customer_profiles for select
+  using (auth.uid() = user_id);
+
+create policy "Users can insert own customer profiles"
+  on public.customer_profiles for insert
+  with check (auth.uid() = user_id);
+
+create policy "Users can update own customer profiles"
+  on public.customer_profiles for update
+  using (auth.uid() = user_id);
+
+create policy "Users can delete own customer profiles"
+  on public.customer_profiles for delete
+  using (auth.uid() = user_id);
